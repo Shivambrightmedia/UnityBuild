@@ -115,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             li.innerHTML = `
                 <div>
-                    <strong><a href="${file.url}" target="_blank">${file.key}</a></strong>
+                    <strong><a href="#" onclick="downloadFile('${file.key}'); return false;">${file.key}</a></strong>
                     <br><small>${sizeInMB} - ${date}</small>
                 </div>
                 ${isAdminUser ? `<button class="delete-btn" onclick="deleteFile('${file.key}')">Remove</button>` : ''}
@@ -123,6 +123,37 @@ document.addEventListener('DOMContentLoaded', () => {
             buildsList.appendChild(li);
         });
     }
+
+    window.downloadFile = async (key) => {
+        let password = "";
+        if (!isAdminUser) {
+            password = prompt(`Please enter the password to download: ${key}`);
+            if (password === null) return; // Cancelled
+        }
+
+        try {
+            const res = await fetch('/api/files/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, password })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                // Create a temporary link and trigger download
+                const a = document.createElement('a');
+                a.href = data.url;
+                a.download = key;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } else {
+                alert('Invalid password or error generating link');
+            }
+        } catch (error) {
+            alert('An error occurred during download request.');
+        }
+    };
 
     window.deleteFile = async (key) => {
         if (!confirm('Are you sure you want to delete this build from AWS S3?')) return;

@@ -88,22 +88,35 @@ app.get('/api/files', async (req, res) => {
         if (!BUCKET_NAME) return res.json({ files: [] });
 
         const result = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET_NAME }));
-        const filesPromises = (result.Contents || []).map(async file => {
-            const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: file.Key });
-            const url = await getSignedUrl(s3, getCommand, { expiresIn: 3600 }); // 1 hour expiry
-            return {
-                key: file.Key,
-                size: file.Size,
-                lastModified: file.LastModified,
-                url
-            };
-        });
+        const files = (result.Contents || []).map(file => ({
+            key: file.Key,
+            size: file.Size,
+            lastModified: file.LastModified
+        }));
 
-        const files = await Promise.all(filesPromises);
         res.json({ files });
     } catch (err) {
         console.error('S3 List Error:', err);
         res.status(500).json({ error: 'Failed to fetch files' });
+    }
+});
+
+app.post('/api/files/download', async (req, res) => {
+    try {
+        const { key, password } = req.body;
+
+        // Allow if already logged in as admin OR if correct password provided
+        if (!req.session.isAdmin && password !== ADMIN_PASSWORD) {
+            return res.status(401).json({ error: 'Invalid password' });
+        }
+
+        const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
+        const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 }); // 5 minutes expiry
+
+        res.json({ url });
+    } catch (err) {
+        console.error('S3 Download URL Error:', err);
+        res.status(500).json({ error: 'Failed to generate download link' });
     }
 });
 
