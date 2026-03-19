@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unity Build & Links Storage</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Unity Build Storage</h1>
+        <div id="auth-section">
+            <input type="password" id="password-input" placeholder="Admin Password">
+            <button id="login-btn">Login</button>
+            <button id="logout-btn" style="display: none;">Logout</button>
+        </div>
+    </header>
+
+    <main>
+        <div id="admin-panel" style="display: none;" class="panel">
+            <h2>Admin Controls</h2>
+            
+            <div class="admin-section">
+                <h3>Upload Build (ZIP)</h3>
+                <input type="file" id="file-input" accept=".zip">
+                <button id="upload-file-btn">Upload to AWS S3</button>
+                <div id="upload-status"></div>
+            </div>
+
+            <div class="admin-section">
+                <h3>Add Web Link</h3>
+                <input type="text" id="link-title" placeholder="Link Title (e.g., Unity Docs)">
+                <input type="url" id="link-url" placeholder="URL (e.g., https://...)">
+                <button id="add-link-btn">Save Link</button>
+            </div>
+        </div>
+
+        <div class="content-section">
+            <div class="column">
+                <h2>Stored Builds</h2>
+                <button id="refresh-builds-btn" class="sm-btn">Refresh Builds</button>
+                <ul id="builds-list"></ul>
+            </div>
+            
+            <div class="column">
+                <h2>Web Links</h2>
+                <ul id="links-list"></ul>
+            </div>
+        </div>
+    </main>
+    <script src="app.js"></script>
+</body>
+</html>
