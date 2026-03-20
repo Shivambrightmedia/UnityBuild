@@ -30,11 +30,12 @@ const s3 = new S3Client({
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
+const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer'; // New password for public access
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
 
-// --- Initialize Local Data File Immediately (Prevents ENOENT Crash) ---
+// --- Initialize Local Data File Immediately ---
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
 }
@@ -52,7 +53,7 @@ async function loadDataFromS3() {
         if (err.name === 'NoSuchKey') {
             console.log('No persistent data found on S3, using local/empty data');
         } else {
-            console.error('S3 Sync Error (Check your AWS Credentials):', err.message);
+            console.error('S3 Sync Error:', err.message);
         }
     }
 }
@@ -80,7 +81,7 @@ const requireAuth = (req, res, next) => {
     res.status(401).json({ error: 'Unauthorized' });
 };
 
-// --- Multer Configuration: Use Disk Storage for Large Files ---
+// --- Multer Configuration ---
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
@@ -88,7 +89,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage: storage, limits: { fileSize: 1000 * 1024 * 1024 } }); // 1GB limit
+const upload = multer({ storage: storage, limits: { fileSize: 1000 * 1024 * 1024 } });
 
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
@@ -127,8 +128,6 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
         };
 
         await s3.send(new PutObjectCommand(uploadParams));
-
-        // Clean up temp file
         fs.unlinkSync(filePath);
 
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
@@ -159,7 +158,7 @@ app.get('/api/files', async (req, res) => {
         const buildsMetadata = data.buildsMetadata || {};
 
         const files = (result.Contents || [])
-            .filter(file => file.Key !== S3_DATA_KEY) // Don't show the data file itself
+            .filter(file => file.Key !== S3_DATA_KEY)
             .map(file => {
                 const meta = buildsMetadata[file.Key] || {};
                 return {
@@ -185,8 +184,9 @@ app.post('/api/files/download', async (req, res) => {
     try {
         const { key, password } = req.body;
 
-        if (!req.session.isAdmin && password !== ADMIN_PASSWORD) {
-            return res.status(401).json({ error: 'Invalid password' });
+        // Check if correct access password or already logged in as admin
+        if (!req.session.isAdmin && password !== ACCESS_PASSWORD) {
+            return res.status(401).json({ error: 'Invalid access password' });
         }
 
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
@@ -249,8 +249,9 @@ app.post('/api/links/:id/access', (req, res) => {
     const { password } = req.body;
     const { id } = req.params;
 
-    if (!req.session.isAdmin && password !== ADMIN_PASSWORD) {
-        return res.status(401).json({ error: 'Invalid password' });
+    // Check if correct access password or already logged in as admin
+    if (!req.session.isAdmin && password !== ACCESS_PASSWORD) {
+        return res.status(401).json({ error: 'Invalid access password' });
     }
 
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
