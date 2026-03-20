@@ -327,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
             data.links.forEach(link => {
                 const li = document.createElement('li');
                 li.innerHTML = `
-                    <a href="${link.url}" target="_blank" class="build-name">${link.title}</a>
+                    <a href="${link.url || '#'}" target="_blank" class="build-name" onclick="window.accessLink(event, '${link.id}', '${link.url}')">${link.title}</a>
                     ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteLink('${link.id}', '${link.title}')" title="Delete">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                     </button>` : ''}
@@ -338,6 +338,39 @@ document.addEventListener('DOMContentLoaded', () => {
             linksList.innerHTML = '<li style="color: var(--danger)">Failed to load links</li>';
         }
     }
+
+    window.accessLink = async (event, id, directUrl) => {
+        // If we are admin or the URL is already provided (for admins), let the link work normally
+        if (isAdminUser && directUrl) return;
+
+        event.preventDefault();
+
+        const password = await showModal({
+            title: 'Access Web Link',
+            message: `Enter password to view this link.`,
+            showInput: true,
+            confirmText: 'Access'
+        });
+
+        if (!password) return;
+
+        try {
+            const res = await fetch(`/api/links/${id}/access`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                window.open(data.url, '_blank');
+            } else {
+                showToast('Invalid password', 'error');
+            }
+        } catch (e) {
+            showToast('Error accessing link', 'error');
+        }
+    };
 
     window.deleteLink = async (id, title) => {
         const confirmed = await showModal({

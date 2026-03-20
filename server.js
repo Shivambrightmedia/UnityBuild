@@ -162,7 +162,33 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
 
 app.get('/api/links', (req, res) => {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
-    res.json({ links: data.links || [] });
+    
+    // Hide URLs if not admin
+    const safeLinks = (data.links || []).map(link => ({
+        id: link.id,
+        title: link.title,
+        url: req.session.isAdmin ? link.url : null // Only show URL to admins
+    }));
+    
+    res.json({ links: safeLinks });
+});
+
+app.post('/api/links/:id/access', (req, res) => {
+    const { password } = req.body;
+    const { id } = req.params;
+
+    if (!req.session.isAdmin && password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+    const link = (data.links || []).find(l => l.id === id);
+
+    if (link) {
+        res.json({ url: link.url });
+    } else {
+        res.status(404).json({ error: 'Link not found' });
+    }
 });
 
 app.post('/api/links', requireAuth, (req, res) => {
