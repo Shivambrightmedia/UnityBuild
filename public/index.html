@@ -30,9 +30,13 @@
             <div class="admin-grid">
                 <div class="admin-section">
                     <h3>Upload Build (ZIP)</h3>
-                    <div class="input-group">
-                        <input type="file" id="file-input" accept=".zip">
-                        <button id="upload-file-btn" class="primary-btn">Upload to AWS S3</button>
+                    <div class="input-stack">
+                        <input type="text" id="event-name" placeholder="Event Name (e.g., Alpha Playtest)">
+                        <input type="text" id="build-info" placeholder="Build Info (e.g., Version 1.0.2 - Fixed UI bugs)">
+                        <div class="input-group">
+                            <input type="file" id="file-input" accept=".zip">
+                            <button id="upload-file-btn" class="primary-btn">Upload to AWS S3</button>
+                        </div>
                     </div>
                     <div id="upload-progress-container" style="display: none;">
                         <div class="progress-bar">

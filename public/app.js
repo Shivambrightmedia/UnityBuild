@@ -6,6 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const adminPanel = document.getElementById('admin-panel');
     const uploadBtn = document.getElementById('upload-file-btn');
     const fileInput = document.getElementById('file-input');
+    const eventNameInput = document.getElementById('event-name');
+    const buildInfoInput = document.getElementById('build-info');
     const buildsList = document.getElementById('builds-list');
     const refreshBuildsBtn = document.getElementById('refresh-builds-btn');
     const linksList = document.getElementById('links-list');
@@ -147,9 +149,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('eventName', eventNameInput.value);
+        formData.append('buildInfo', buildInfoInput.value);
 
         progressContainer.style.display = 'block';
-        progressFill.style.width = '30%'; // Simulated start
+        progressFill.style.width = '30%'; 
         uploadBtn.disabled = true;
 
         try {
@@ -162,6 +166,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 progressFill.style.width = '100%';
                 showToast('Build uploaded successfully!', 'success');
                 fileInput.value = '';
+                eventNameInput.value = '';
+                buildInfoInput.value = '';
                 setTimeout(() => {
                     progressContainer.style.display = 'none';
                     progressFill.style.width = '0%';
@@ -200,7 +206,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 li.innerHTML = `
                     <div class="build-info">
                         <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">${file.key}</a>
-                        <span class="build-meta">${sizeInMB} • ${date}</span>
+                        <span class="build-meta">
+                            <strong>Event:</strong> ${file.eventName}<br>
+                            <strong>Info:</strong> ${file.buildInfo}<br>
+                            ${sizeInMB} • ${date}
+                        </span>
                     </div>
                     ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>

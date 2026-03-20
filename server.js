@@ -32,8 +32,15 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 
+// Ensure data.json exists with the correct structure
 if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [] }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
+} else {
+    const currentData = JSON.parse(fs.readFileSync(DATA_FILE));
+    if (!currentData.buildsMetadata) {
+        currentData.buildsMetadata = {};
+        fs.writeFileSync(DATA_FILE, JSON.stringify(currentData, null, 2));
+    }
 }
 
 const requireAuth = (req, res, next) => {
@@ -66,6 +73,7 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+        const { eventName, buildInfo } = req.body;
         const fileName = `${Date.now()}-${req.file.originalname}`;
 
         const uploadParams = {
@@ -76,6 +84,15 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
         };
 
         await s3.send(new PutObjectCommand(uploadParams));
+
+        // Save metadata
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        data.buildsMetadata[fileName] = {
+            eventName: eventName || 'N/A',
+            buildInfo: buildInfo || 'N/A'
+        };
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+
         res.json({ success: true, fileName });
     } catch (err) {
         console.error('S3 Upload Error:', err);
@@ -88,10 +105,15 @@ app.get('/api/files', async (req, res) => {
         if (!BUCKET_NAME) return res.json({ files: [] });
 
         const result = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET_NAME }));
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        const buildsMetadata = data.buildsMetadata || {};
+
         const files = (result.Contents || []).map(file => ({
             key: file.Key,
             size: file.Size,
-            lastModified: file.LastModified
+            lastModified: file.LastModified,
+            eventName: buildsMetadata[file.Key]?.eventName || 'N/A',
+            buildInfo: buildsMetadata[file.Key]?.buildInfo || 'N/A'
         }));
 
         res.json({ files });
@@ -105,13 +127,12 @@ app.post('/api/files/download', async (req, res) => {
     try {
         const { key, password } = req.body;
 
-        // Allow if already logged in as admin OR if correct password provided
         if (!req.session.isAdmin && password !== ADMIN_PASSWORD) {
             return res.status(401).json({ error: 'Invalid password' });
         }
 
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
-        const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 }); // 5 minutes expiry
+        const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
 
         res.json({ url });
     } catch (err) {
@@ -124,6 +145,14 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
     try {
         const { key } = req.params;
         await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+
+        // Remove metadata
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        if (data.buildsMetadata && data.buildsMetadata[key]) {
+            delete data.buildsMetadata[key];
+            fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        }
+
         res.json({ success: true });
     } catch (err) {
         console.error('S3 Delete Error:', err);
@@ -133,7 +162,7 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
 
 app.get('/api/links', (req, res) => {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
-    res.json({ links: data.links });
+    res.json({ links: data.links || [] });
 });
 
 app.post('/api/links', requireAuth, (req, res) => {
