@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isAdminUser = false;
     let modalResolve = null;
-    let allBuilds = []; // Store all builds for searching
+    let allBuilds = [];
 
     // --- Helpers ---
     function formatDateTime(isoString) {
@@ -54,12 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Custom Modal ---
-    function showModal({ title, message, showInput = false, confirmText = 'Confirm', cancelText = 'Cancel' }) {
+    function showModal({ title, message, showInput = false, confirmText = 'Confirm', cancelText = 'Cancel', placeholder = 'Enter password...' }) {
         return new Promise((resolve) => {
             modalTitle.textContent = title;
             modalMessage.textContent = message;
             modalInputContainer.style.display = showInput ? 'block' : 'none';
             modalInput.value = '';
+            modalInput.placeholder = placeholder;
             modalConfirmBtn.textContent = confirmText;
             modalCancelBtn.textContent = cancelText;
             modal.style.display = 'flex';
@@ -202,7 +203,6 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/files');
             const data = await res.json();
-
             allBuilds = data.files || [];
             renderBuilds();
         } catch (e) {
@@ -212,7 +212,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBuilds(filter = '') {
         buildsList.innerHTML = '';
-        
         const filtered = allBuilds.filter(file => {
             const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
             return searchStr.includes(filter);
@@ -285,25 +284,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.deleteFile = async (key) => {
-        const confirmed = await showModal({
-            title: 'Delete Build',
-            message: `Are you sure you want to delete "${key}"? This cannot be undone.`,
-            confirmText: 'Delete',
-            cancelText: 'Cancel'
+        const password = await showModal({
+            title: 'Confirm Delete',
+            message: `Enter the Delete Password to remove "${key}":`,
+            showInput: true,
+            confirmText: 'Delete Forever',
+            placeholder: 'Delete password'
         });
 
-        if (!confirmed) return;
+        if (!password) return;
 
         try {
             const res = await fetch('/api/files/' + encodeURIComponent(key), {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deletePassword: password })
             });
 
             if (res.ok) {
                 showToast('Build deleted successfully', 'success');
                 loadBuilds();
             } else {
-                showToast('Failed to delete build', 'error');
+                const err = await res.json();
+                showToast(err.error || 'Failed to delete build', 'error');
             }
         } catch (e) {
             showToast('Network error', 'error');
@@ -396,24 +399,29 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.deleteLink = async (id, title) => {
-        const confirmed = await showModal({
-            title: 'Delete Link',
-            message: `Delete link "${title}"?`,
-            confirmText: 'Delete'
+        const password = await showModal({
+            title: 'Confirm Delete Link',
+            message: `Enter the Delete Password to remove "${title}":`,
+            showInput: true,
+            confirmText: 'Delete Link',
+            placeholder: 'Delete password'
         });
 
-        if (!confirmed) return;
+        if (!password) return;
 
         try {
             const res = await fetch('/api/links/' + id, {
-                method: 'DELETE'
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deletePassword: password })
             });
 
             if (res.ok) {
                 showToast('Link removed', 'success');
                 loadLinks();
             } else {
-                showToast('Failed to remove link', 'error');
+                const err = await res.json();
+                showToast(err.error || 'Failed to remove link', 'error');
             }
         } catch (e) {
             showToast('Network error', 'error');

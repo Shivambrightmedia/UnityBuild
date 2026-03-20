@@ -29,10 +29,10 @@ const s3 = new S3Client({
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
+const DELETE_PASSWORD = process.env.DELETE_PASSWORD; // Sourced strictly from environment variables
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 
-// Ensure data.json exists with the correct structure
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
 } else {
@@ -85,7 +85,6 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
 
         await s3.send(new PutObjectCommand(uploadParams));
 
-        // Save metadata
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         data.buildsMetadata[fileName] = {
             eventName: eventName || 'N/A',
@@ -143,7 +142,6 @@ app.post('/api/files/download', async (req, res) => {
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
 
-        // Update download statistics
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         if (!data.buildsMetadata[key]) {
             data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
@@ -161,12 +159,18 @@ app.post('/api/files/download', async (req, res) => {
     }
 });
 
+// Updated Delete Route with Password check
 app.delete('/api/files/:key', requireAuth, async (req, res) => {
     try {
         const { key } = req.params;
+        const { deletePassword } = req.body;
+
+        if (deletePassword !== DELETE_PASSWORD) {
+            return res.status(401).json({ error: 'Invalid delete password' });
+        }
+
         await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
 
-        // Remove metadata
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         if (data.buildsMetadata && data.buildsMetadata[key]) {
             delete data.buildsMetadata[key];
@@ -220,7 +224,13 @@ app.post('/api/links', requireAuth, (req, res) => {
     res.json({ success: true, link: newLink });
 });
 
+// Updated Delete Link Route with Password check
 app.delete('/api/links/:id', requireAuth, (req, res) => {
+    const { deletePassword } = req.body;
+    if (deletePassword !== DELETE_PASSWORD) {
+        return res.status(401).json({ error: 'Invalid delete password' });
+    }
+
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
     data.links = data.links.filter(link => link.id !== req.params.id);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
