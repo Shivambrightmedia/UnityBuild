@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const linkUrl = document.getElementById('link-url');
     const progressContainer = document.getElementById('upload-progress-container');
     const progressFill = document.getElementById('progress-fill');
+    const buildSearchInput = document.getElementById('build-search');
 
     // Modal Elements
     const modal = document.getElementById('custom-modal');
@@ -28,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isAdminUser = false;
     let modalResolve = null;
+    let allBuilds = []; // Store all builds for searching
 
     // --- Helpers ---
     function formatDateTime(isoString) {
@@ -145,6 +147,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Builds Management ---
     refreshBuildsBtn.addEventListener('click', loadBuilds);
 
+    buildSearchInput.addEventListener('input', () => {
+        renderBuilds(buildSearchInput.value.toLowerCase());
+    });
+
     uploadBtn.addEventListener('click', async () => {
         const file = fileInput.files[0];
         if (!file) {
@@ -197,37 +203,48 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/files');
             const data = await res.json();
 
-            buildsList.innerHTML = '';
-            if (!data.files || data.files.length === 0) {
-                buildsList.innerHTML = '<li style="color: var(--text-light)">No builds found</li>';
-                return;
-            }
-
-            data.files.forEach(file => {
-                const li = document.createElement('li');
-                const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-                const uploadTime = formatDateTime(file.uploadTime);
-                const lastDownload = formatDateTime(file.lastDownloaded);
-
-                li.innerHTML = `
-                    <div class="build-info">
-                        <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">${file.key}</a>
-                        <span class="build-meta">
-                            <strong>Event:</strong> ${file.eventName}<br>
-                            <strong>Info:</strong> ${file.buildInfo}<br>
-                            <strong>Uploaded:</strong> ${uploadTime} (${sizeInMB})<br>
-                            <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${lastDownload}
-                        </span>
-                    </div>
-                    ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>` : ''}
-                `;
-                buildsList.appendChild(li);
-            });
+            allBuilds = data.files || [];
+            renderBuilds();
         } catch (e) {
             buildsList.innerHTML = '<li style="color: var(--danger)">Failed to load builds</li>';
         }
+    }
+
+    function renderBuilds(filter = '') {
+        buildsList.innerHTML = '';
+        
+        const filtered = allBuilds.filter(file => {
+            const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
+            return searchStr.includes(filter);
+        });
+
+        if (filtered.length === 0) {
+            buildsList.innerHTML = `<li style="color: var(--text-light)">${allBuilds.length === 0 ? 'No builds found' : 'No matching results'}</li>`;
+            return;
+        }
+
+        filtered.forEach(file => {
+            const li = document.createElement('li');
+            const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+            const uploadTime = formatDateTime(file.uploadTime);
+            const lastDownload = formatDateTime(file.lastDownloaded);
+
+            li.innerHTML = `
+                <div class="build-info">
+                    <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">${file.key}</a>
+                    <span class="build-meta">
+                        <strong>Event:</strong> ${file.eventName}<br>
+                        <strong>Info:</strong> ${file.buildInfo}<br>
+                        <strong>Uploaded:</strong> ${uploadTime} (${sizeInMB})<br>
+                        <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${lastDownload}
+                    </span>
+                </div>
+                ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>` : ''}
+            `;
+            buildsList.appendChild(li);
+        });
     }
 
     window.downloadFile = async (key) => {
@@ -258,7 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 a.click();
                 document.body.removeChild(a);
                 showToast('Download started');
-                setTimeout(loadBuilds, 1000); // Refresh stats
+                setTimeout(loadBuilds, 1000); 
             } else {
                 showToast('Invalid password or access denied', 'error');
             }

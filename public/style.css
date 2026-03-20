@@ -184,6 +184,25 @@ main {
     font-size: 1.125rem;
 }
 
+.search-container {
+    padding: 0 1.25rem 0.75rem;
+}
+
+.search-input {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    background-color: #f9fafb;
+}
+
+.search-input:focus {
+    background-color: white;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
 .list {
     list-style: none;
     padding: 0;
