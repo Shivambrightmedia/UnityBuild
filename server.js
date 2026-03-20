@@ -34,22 +34,25 @@ const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
 
+// --- Initialize Local Data File Immediately (Prevents ENOENT Crash) ---
+if (!fs.existsSync(DATA_FILE)) {
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
+}
+
 // --- S3 Persistence Helpers ---
 async function loadDataFromS3() {
     try {
+        console.log('Attempting to sync data from S3...');
         const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: S3_DATA_KEY });
         const response = await s3.send(command);
         const dataStr = await response.Body.transformToString();
         fs.writeFileSync(DATA_FILE, dataStr);
-        console.log('Data synced from S3');
+        console.log('Data successfully synced from S3');
     } catch (err) {
         if (err.name === 'NoSuchKey') {
-            console.log('No persistent data found on S3, starting fresh');
-            const initialData = { links: [], buildsMetadata: {} };
-            fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
-            await saveDataToS3(initialData);
+            console.log('No persistent data found on S3, using local/empty data');
         } else {
-            console.error('Error loading data from S3:', err);
+            console.error('S3 Sync Error (Check your AWS Credentials):', err.message);
         }
     }
 }
@@ -65,17 +68,27 @@ async function saveDataToS3(data) {
         await s3.send(command);
         console.log('Data backed up to S3');
     } catch (err) {
-        console.error('Error saving data to S3:', err);
+        console.error('Error backing up to S3:', err.message);
     }
 }
 
-// Initialize persistence
+// Start S3 sync
 loadDataFromS3();
 
 const requireAuth = (req, res, next) => {
     if (req.session.isAdmin) return next();
     res.status(401).json({ error: 'Unauthorized' });
 };
+
+// --- Multer Configuration: Use Disk Storage for Large Files ---
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
+});
+const upload = multer({ storage: storage, limits: { fileSize: 1000 * 1024 * 1024 } }); // 1GB limit
 
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
@@ -96,23 +109,27 @@ app.post('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
-const upload = multer({ storage: multer.memoryStorage() });
-
 app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
         const { eventName, buildInfo } = req.body;
-        const fileName = `${Date.now()}-${req.file.originalname}`;
+        const fileName = req.file.filename;
+        const filePath = req.file.path;
+
+        const fileStream = fs.createReadStream(filePath);
 
         const uploadParams = {
             Bucket: BUCKET_NAME,
             Key: fileName,
-            Body: req.file.buffer,
-            ContentType: req.file.mimetype
+            Body: fileStream,
+            ContentType: 'application/zip'
         };
 
         await s3.send(new PutObjectCommand(uploadParams));
+
+        // Clean up temp file
+        fs.unlinkSync(filePath);
 
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         data.buildsMetadata[fileName] = {
@@ -123,12 +140,13 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
             lastDownloaded: null
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-        await saveDataToS3(data); // Sync to S3
+        await saveDataToS3(data);
 
         res.json({ success: true, fileName });
     } catch (err) {
-        console.error('S3 Upload Error:', err);
-        res.status(500).json({ error: 'Failed to upload to S3' });
+        console.error('Upload Error:', err);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Upload failed: ' + err.message });
     }
 });
 
@@ -140,19 +158,21 @@ app.get('/api/files', async (req, res) => {
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         const buildsMetadata = data.buildsMetadata || {};
 
-        const files = (result.Contents || []).map(file => {
-            const meta = buildsMetadata[file.Key] || {};
-            return {
-                key: file.Key,
-                size: file.Size,
-                lastModified: file.LastModified,
-                eventName: meta.eventName || 'N/A',
-                buildInfo: meta.buildInfo || 'N/A',
-                uploadTime: meta.uploadTime || file.LastModified,
-                downloadCount: meta.downloadCount || 0,
-                lastDownloaded: meta.lastDownloaded || null
-            };
-        });
+        const files = (result.Contents || [])
+            .filter(file => file.Key !== S3_DATA_KEY) // Don't show the data file itself
+            .map(file => {
+                const meta = buildsMetadata[file.Key] || {};
+                return {
+                    key: file.Key,
+                    size: file.Size,
+                    lastModified: file.LastModified,
+                    eventName: meta.eventName || 'N/A',
+                    buildInfo: meta.buildInfo || 'N/A',
+                    uploadTime: meta.uploadTime || file.LastModified,
+                    downloadCount: meta.downloadCount || 0,
+                    lastDownloaded: meta.lastDownloaded || null
+                };
+            });
 
         res.json({ files });
     } catch (err) {
@@ -181,12 +201,12 @@ app.post('/api/files/download', async (req, res) => {
         data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
         
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-        await saveDataToS3(data); // Sync to S3
+        await saveDataToS3(data);
 
         res.json({ url });
     } catch (err) {
-        console.error('S3 Download URL Error:', err);
-        res.status(500).json({ error: 'Failed to generate download link' });
+        console.error('Download URL Error:', err);
+        res.status(500).json({ error: 'Failed to generate link' });
     }
 });
 
@@ -205,13 +225,13 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
         if (data.buildsMetadata && data.buildsMetadata[key]) {
             delete data.buildsMetadata[key];
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-            await saveDataToS3(data); // Sync to S3
+            await saveDataToS3(data);
         }
 
         res.json({ success: true });
     } catch (err) {
-        console.error('S3 Delete Error:', err);
-        res.status(500).json({ error: 'Failed to delete file' });
+        console.error('Delete Error:', err);
+        res.status(500).json({ error: 'Delete failed' });
     }
 });
 
@@ -251,7 +271,7 @@ app.post('/api/links', requireAuth, async (req, res) => {
     const newLink = { id: Date.now().toString(), title, url };
     data.links.push(newLink);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    await saveDataToS3(data); // Sync to S3
+    await saveDataToS3(data);
 
     res.json({ success: true, link: newLink });
 });
@@ -265,11 +285,11 @@ app.delete('/api/links/:id', requireAuth, async (req, res) => {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
     data.links = data.links.filter(link => link.id !== req.params.id);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-    await saveDataToS3(data); // Sync to S3
+    await saveDataToS3(data);
 
     res.json({ success: true });
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
