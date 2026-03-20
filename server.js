@@ -29,19 +29,48 @@ const s3 = new S3Client({
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
-const DELETE_PASSWORD = process.env.DELETE_PASSWORD; // Sourced strictly from environment variables
+const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 
 const DATA_FILE = path.join(__dirname, 'data.json');
+const S3_DATA_KEY = 'persistent_data.json';
 
-if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
-} else {
-    const currentData = JSON.parse(fs.readFileSync(DATA_FILE));
-    if (!currentData.buildsMetadata) {
-        currentData.buildsMetadata = {};
-        fs.writeFileSync(DATA_FILE, JSON.stringify(currentData, null, 2));
+// --- S3 Persistence Helpers ---
+async function loadDataFromS3() {
+    try {
+        const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: S3_DATA_KEY });
+        const response = await s3.send(command);
+        const dataStr = await response.Body.transformToString();
+        fs.writeFileSync(DATA_FILE, dataStr);
+        console.log('Data synced from S3');
+    } catch (err) {
+        if (err.name === 'NoSuchKey') {
+            console.log('No persistent data found on S3, starting fresh');
+            const initialData = { links: [], buildsMetadata: {} };
+            fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
+            await saveDataToS3(initialData);
+        } else {
+            console.error('Error loading data from S3:', err);
+        }
     }
 }
+
+async function saveDataToS3(data) {
+    try {
+        const command = new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: S3_DATA_KEY,
+            Body: JSON.stringify(data, null, 2),
+            ContentType: 'application/json'
+        });
+        await s3.send(command);
+        console.log('Data backed up to S3');
+    } catch (err) {
+        console.error('Error saving data to S3:', err);
+    }
+}
+
+// Initialize persistence
+loadDataFromS3();
 
 const requireAuth = (req, res, next) => {
     if (req.session.isAdmin) return next();
@@ -94,6 +123,7 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
             lastDownloaded: null
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data); // Sync to S3
 
         res.json({ success: true, fileName });
     } catch (err) {
@@ -151,6 +181,7 @@ app.post('/api/files/download', async (req, res) => {
         data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
         
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data); // Sync to S3
 
         res.json({ url });
     } catch (err) {
@@ -159,7 +190,6 @@ app.post('/api/files/download', async (req, res) => {
     }
 });
 
-// Updated Delete Route with Password check
 app.delete('/api/files/:key', requireAuth, async (req, res) => {
     try {
         const { key } = req.params;
@@ -175,6 +205,7 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
         if (data.buildsMetadata && data.buildsMetadata[key]) {
             delete data.buildsMetadata[key];
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+            await saveDataToS3(data); // Sync to S3
         }
 
         res.json({ success: true });
@@ -212,7 +243,7 @@ app.post('/api/links/:id/access', (req, res) => {
     }
 });
 
-app.post('/api/links', requireAuth, (req, res) => {
+app.post('/api/links', requireAuth, async (req, res) => {
     const { title, url } = req.body;
     if (!title || !url) return res.status(400).json({ error: 'Title and URL required' });
 
@@ -220,12 +251,12 @@ app.post('/api/links', requireAuth, (req, res) => {
     const newLink = { id: Date.now().toString(), title, url };
     data.links.push(newLink);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    await saveDataToS3(data); // Sync to S3
 
     res.json({ success: true, link: newLink });
 });
 
-// Updated Delete Link Route with Password check
-app.delete('/api/links/:id', requireAuth, (req, res) => {
+app.delete('/api/links/:id', requireAuth, async (req, res) => {
     const { deletePassword } = req.body;
     if (deletePassword !== DELETE_PASSWORD) {
         return res.status(401).json({ error: 'Invalid delete password' });
@@ -234,6 +265,7 @@ app.delete('/api/links/:id', requireAuth, (req, res) => {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
     data.links = data.links.filter(link => link.id !== req.params.id);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    await saveDataToS3(data); // Sync to S3
 
     res.json({ success: true });
 });
