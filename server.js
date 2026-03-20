@@ -30,12 +30,12 @@ const s3 = new S3Client({
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
-const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer'; // New password for public access
+const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer';
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
 
-// --- Initialize Local Data File Immediately ---
+// --- Initialize Local Data File ---
 if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
 }
@@ -51,7 +51,7 @@ async function loadDataFromS3() {
         console.log('Data successfully synced from S3');
     } catch (err) {
         if (err.name === 'NoSuchKey') {
-            console.log('No persistent data found on S3, using local/empty data');
+            console.log('No persistent data found on S3');
         } else {
             console.error('S3 Sync Error:', err.message);
         }
@@ -73,7 +73,6 @@ async function saveDataToS3(data) {
     }
 }
 
-// Start S3 sync
 loadDataFromS3();
 
 const requireAuth = (req, res, next) => {
@@ -136,7 +135,8 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
             buildInfo: buildInfo || 'N/A',
             uploadTime: new Date().toISOString(),
             downloadCount: 0,
-            lastDownloaded: null
+            lastDownloaded: null,
+            pinned: false
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
@@ -169,7 +169,8 @@ app.get('/api/files', async (req, res) => {
                     buildInfo: meta.buildInfo || 'N/A',
                     uploadTime: meta.uploadTime || file.LastModified,
                     downloadCount: meta.downloadCount || 0,
-                    lastDownloaded: meta.lastDownloaded || null
+                    lastDownloaded: meta.lastDownloaded || null,
+                    pinned: meta.pinned || false
                 };
             });
 
@@ -180,15 +181,33 @@ app.get('/api/files', async (req, res) => {
     }
 });
 
+// --- NEW: Toggle Pin for Files ---
+app.post('/api/files/:key/pin', requireAuth, async (req, res) => {
+    try {
+        const { key } = req.params;
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        
+        if (!data.buildsMetadata[key]) {
+            data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', pinned: false };
+        }
+        
+        data.buildsMetadata[key].pinned = !data.buildsMetadata[key].pinned;
+        
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data);
+        
+        res.json({ success: true, pinned: data.buildsMetadata[key].pinned });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to pin file' });
+    }
+});
+
 app.post('/api/files/download', async (req, res) => {
     try {
         const { key, password } = req.body;
-
-        // Check if correct access password or already logged in as admin
         if (!req.session.isAdmin && password !== ACCESS_PASSWORD) {
             return res.status(401).json({ error: 'Invalid access password' });
         }
-
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
 
@@ -196,16 +215,13 @@ app.post('/api/files/download', async (req, res) => {
         if (!data.buildsMetadata[key]) {
             data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
         }
-        
         data.buildsMetadata[key].downloadCount = (data.buildsMetadata[key].downloadCount || 0) + 1;
         data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
         
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
-
         res.json({ url });
     } catch (err) {
-        console.error('Download URL Error:', err);
         res.status(500).json({ error: 'Failed to generate link' });
     }
 });
@@ -214,23 +230,16 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
     try {
         const { key } = req.params;
         const { deletePassword } = req.body;
-
-        if (deletePassword !== DELETE_PASSWORD) {
-            return res.status(401).json({ error: 'Invalid delete password' });
-        }
-
+        if (deletePassword !== DELETE_PASSWORD) return res.status(401).json({ error: 'Invalid delete password' });
         await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
-
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         if (data.buildsMetadata && data.buildsMetadata[key]) {
             delete data.buildsMetadata[key];
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
             await saveDataToS3(data);
         }
-
         res.json({ success: true });
     } catch (err) {
-        console.error('Delete Error:', err);
         res.status(500).json({ error: 'Delete failed' });
     }
 });
@@ -240,54 +249,60 @@ app.get('/api/links', (req, res) => {
     const safeLinks = (data.links || []).map(link => ({
         id: link.id,
         title: link.title,
+        pinned: link.pinned || false,
         url: req.session.isAdmin ? link.url : null 
     }));
     res.json({ links: safeLinks });
 });
 
+// --- NEW: Toggle Pin for Links ---
+app.post('/api/links/:id/pin', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        const link = (data.links || []).find(l => l.id === id);
+        
+        if (link) {
+            link.pinned = !link.pinned;
+            fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+            await saveDataToS3(data);
+            res.json({ success: true, pinned: link.pinned });
+        } else {
+            res.status(404).json({ error: 'Link not found' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to pin link' });
+    }
+});
+
 app.post('/api/links/:id/access', (req, res) => {
     const { password } = req.body;
     const { id } = req.params;
-
-    // Check if correct access password or already logged in as admin
-    if (!req.session.isAdmin && password !== ACCESS_PASSWORD) {
-        return res.status(401).json({ error: 'Invalid access password' });
-    }
-
+    if (!req.session.isAdmin && password !== ACCESS_PASSWORD) return res.status(401).json({ error: 'Invalid access password' });
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
     const link = (data.links || []).find(l => l.id === id);
-
-    if (link) {
-        res.json({ url: link.url });
-    } else {
-        res.status(404).json({ error: 'Link not found' });
-    }
+    if (link) res.json({ url: link.url });
+    else res.status(404).json({ error: 'Link not found' });
 });
 
 app.post('/api/links', requireAuth, async (req, res) => {
     const { title, url } = req.body;
     if (!title || !url) return res.status(400).json({ error: 'Title and URL required' });
-
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
-    const newLink = { id: Date.now().toString(), title, url };
+    const newLink = { id: Date.now().toString(), title, url, pinned: false };
     data.links.push(newLink);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await saveDataToS3(data);
-
     res.json({ success: true, link: newLink });
 });
 
 app.delete('/api/links/:id', requireAuth, async (req, res) => {
     const { deletePassword } = req.body;
-    if (deletePassword !== DELETE_PASSWORD) {
-        return res.status(401).json({ error: 'Invalid delete password' });
-    }
-
+    if (deletePassword !== DELETE_PASSWORD) return res.status(401).json({ error: 'Invalid delete password' });
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
     data.links = data.links.filter(link => link.id !== req.params.id);
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await saveDataToS3(data);
-
     res.json({ success: true });
 });
 

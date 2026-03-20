@@ -11,6 +11,8 @@
     --success: #10b981;
     --radius: 0.5rem;
     --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --pin-bg: #fefce8;
+    --pin-color: #eab308;
 }
 
 * {
@@ -103,6 +105,7 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
+    border-radius: 0.375rem;
 }
 
 .icon-btn:hover {
@@ -215,15 +218,40 @@ main {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    transition: background-color 0.2s;
 }
 
 .list li:last-child {
     border-bottom: none;
 }
 
+.pinned-item {
+    background-color: var(--pin-bg);
+}
+
+.pin-icon {
+    color: var(--pin-color);
+    font-size: 1.1rem;
+    vertical-align: middle;
+}
+
+.pin-btn.active {
+    color: var(--pin-color);
+}
+
+.pin-btn.active:hover {
+    background-color: #fef9c3;
+}
+
+.item-actions {
+    display: flex;
+    gap: 0.25rem;
+}
+
 .build-info {
     display: flex;
     flex-direction: column;
+    flex: 1;
 }
 
 .build-name {

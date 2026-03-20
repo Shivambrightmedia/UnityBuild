@@ -171,7 +171,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/files', true);
 
-        // --- Real-time progress tracking ---
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
                 const percentComplete = (e.loaded / e.total) * 100;
@@ -226,7 +225,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBuilds(filter = '') {
         buildsList.innerHTML = '';
-        const filtered = allBuilds.filter(file => {
+        
+        // Sort: Pinned first, then by date descending
+        const sortedBuilds = [...allBuilds].sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+            return new Date(b.uploadTime) - new Date(a.uploadTime);
+        });
+
+        const filtered = sortedBuilds.filter(file => {
             const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
             return searchStr.includes(filter);
         });
@@ -238,13 +244,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         filtered.forEach(file => {
             const li = document.createElement('li');
+            if (file.pinned) li.classList.add('pinned-item');
+            
             const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
             const uploadTime = formatDateTime(file.uploadTime);
             const lastDownload = formatDateTime(file.lastDownloaded);
 
             li.innerHTML = `
                 <div class="build-info">
-                    <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">${file.key}</a>
+                    <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">
+                        ${file.pinned ? '<span class="pin-icon">Γ£┬ö</span> ' : ''}${file.key}
+                    </a>
                     <span class="build-meta">
                         <strong>Event:</strong> ${file.eventName}<br>
                         <strong>Info:</strong> ${file.buildInfo}<br>
@@ -252,13 +262,32 @@ document.addEventListener('DOMContentLoaded', () => {
                         <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${lastDownload}
                     </span>
                 </div>
-                ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>` : ''}
+                <div class="item-actions">
+                    ${isAdminUser ? `
+                        <button class="pin-btn icon-btn ${file.pinned ? 'active' : ''}" onclick="window.togglePinFile('${file.key}')" title="${file.pinned ? 'Unpin' : 'Pin'}">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                        </button>
+                        <button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                    ` : ''}
+                </div>
             `;
             buildsList.appendChild(li);
         });
     }
+
+    window.togglePinFile = async (key) => {
+        try {
+            const res = await fetch(`/api/files/${encodeURIComponent(key)}/pin`, { method: 'POST' });
+            if (res.ok) {
+                loadBuilds();
+                showToast('Pin status updated');
+            }
+        } catch (e) {
+            showToast('Failed to update pin', 'error');
+        }
+    };
 
     window.downloadFile = async (key) => {
         let password = "";
@@ -359,20 +388,36 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/links');
             const data = await res.json();
+            
+            // Sort: Pinned first
+            const sortedLinks = (data.links || []).sort((a, b) => (a.pinned === b.pinned) ? 0 : a.pinned ? -1 : 1);
 
             linksList.innerHTML = '';
-            if (!data.links || data.links.length === 0) {
+            if (sortedLinks.length === 0) {
                 linksList.innerHTML = '<li style="color: var(--text-light)">No links found</li>';
                 return;
             }
 
-            data.links.forEach(link => {
+            sortedLinks.forEach(link => {
                 const li = document.createElement('li');
+                if (link.pinned) li.classList.add('pinned-item');
+                
                 li.innerHTML = `
-                    <a href="${link.url || '#'}" target="_blank" class="build-name" onclick="window.accessLink(event, '${link.id}', '${link.url}')">${link.title}</a>
-                    ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteLink('${link.id}', '${link.title}')" title="Delete">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>` : ''}
+                    <div class="build-info">
+                        <a href="${link.url || '#'}" target="_blank" class="build-name" onclick="window.accessLink(event, '${link.id}', '${link.url}')">
+                            ${link.pinned ? '<span class="pin-icon">Γ£┬ö</span> ' : ''}${link.title}
+                        </a>
+                    </div>
+                    <div class="item-actions">
+                        ${isAdminUser ? `
+                            <button class="pin-btn icon-btn ${link.pinned ? 'active' : ''}" onclick="window.togglePinLink('${link.id}')" title="${link.pinned ? 'Unpin' : 'Pin'}">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                            </button>
+                            <button class="delete-btn icon-btn" onclick="window.deleteLink('${link.id}', '${link.title}')" title="Delete">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                        ` : ''}
+                    </div>
                 `;
                 linksList.appendChild(li);
             });
@@ -380,6 +425,18 @@ document.addEventListener('DOMContentLoaded', () => {
             linksList.innerHTML = '<li style="color: var(--danger)">Failed to load links</li>';
         }
     }
+
+    window.togglePinLink = async (id) => {
+        try {
+            const res = await fetch(`/api/links/${id}/pin`, { method: 'POST' });
+            if (res.ok) {
+                loadLinks();
+                showToast('Pin status updated');
+            }
+        } catch (e) {
+            showToast('Failed to update pin', 'error');
+        }
+    };
 
     window.accessLink = async (event, id, directUrl) => {
         if (isAdminUser && directUrl) return;
