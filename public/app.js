@@ -1,40 +1,121 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // UI Elements
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
     const passwordInput = document.getElementById('password-input');
     const adminPanel = document.getElementById('admin-panel');
+    const uploadBtn = document.getElementById('upload-file-btn');
+    const fileInput = document.getElementById('file-input');
+    const buildsList = document.getElementById('builds-list');
+    const refreshBuildsBtn = document.getElementById('refresh-builds-btn');
+    const linksList = document.getElementById('links-list');
+    const addLinkBtn = document.getElementById('add-link-btn');
+    const linkTitle = document.getElementById('link-title');
+    const linkUrl = document.getElementById('link-url');
+    const progressContainer = document.getElementById('upload-progress-container');
+    const progressFill = document.getElementById('progress-fill');
+
+    // Modal Elements
+    const modal = document.getElementById('custom-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalMessage = document.getElementById('modal-message');
+    const modalInputContainer = document.getElementById('modal-input-container');
+    const modalInput = document.getElementById('modal-input');
+    const modalCancelBtn = document.getElementById('modal-cancel-btn');
+    const modalConfirmBtn = document.getElementById('modal-confirm-btn');
 
     let isAdminUser = false;
+    let modalResolve = null;
 
-    // Check auth status
-    fetch('/api/auth/status')
-        .then(res => res.json())
-        .then(data => {
+    // --- Toast Notifications ---
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(100%)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // --- Custom Modal (Replacement for alert/confirm/prompt) ---
+    function showModal({ title, message, showInput = false, confirmText = 'Confirm', cancelText = 'Cancel' }) {
+        return new Promise((resolve) => {
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalInputContainer.style.display = showInput ? 'block' : 'none';
+            modalInput.value = '';
+            modalConfirmBtn.textContent = confirmText;
+            modalCancelBtn.textContent = cancelText;
+            modal.style.display = 'flex';
+            
+            if (showInput) setTimeout(() => modalInput.focus(), 100);
+
+            modalResolve = resolve;
+        });
+    }
+
+    modalConfirmBtn.addEventListener('click', () => {
+        const value = modalInputContainer.style.display === 'block' ? modalInput.value : true;
+        closeModal(value);
+    });
+
+    modalCancelBtn.addEventListener('click', () => closeModal(null));
+
+    function closeModal(value) {
+        modal.style.display = 'none';
+        if (modalResolve) modalResolve(value);
+        modalResolve = null;
+    }
+
+    // --- Authentication ---
+    async function checkAuth() {
+        try {
+            const res = await fetch('/api/auth/status');
+            const data = await res.json();
             isAdminUser = data.isAdmin;
             updateUI();
-        });
+        } catch (e) {
+            console.error("Auth check failed", e);
+        }
+    }
 
     loginBtn.addEventListener('click', async () => {
         const password = passwordInput.value;
-        const res = await fetch('/api/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password })
-        });
-        const data = await res.json();
+        if (!password) {
+            showToast('Please enter a password', 'error');
+            return;
+        }
 
-        if (data.success) {
-            isAdminUser = true;
-            passwordInput.value = '';
-            updateUI();
-        } else {
-            alert('Invalid password');
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                isAdminUser = true;
+                passwordInput.value = '';
+                showToast('Logged in successfully', 'success');
+                updateUI();
+            } else {
+                showToast('Invalid password', 'error');
+            }
+        } catch (e) {
+            showToast('Login failed', 'error');
         }
     });
 
     logoutBtn.addEventListener('click', async () => {
         await fetch('/api/logout', { method: 'POST' });
         isAdminUser = false;
+        showToast('Logged out');
         updateUI();
     });
 
@@ -54,26 +135,21 @@ document.addEventListener('DOMContentLoaded', () => {
         loadLinks();
     }
 
-    // Handles files
-    const uploadBtn = document.getElementById('upload-file-btn');
-    const fileInput = document.getElementById('file-input');
-    const uploadStatus = document.getElementById('upload-status');
-    const buildsList = document.getElementById('builds-list');
-    const refreshBuildsBtn = document.getElementById('refresh-builds-btn');
-
+    // --- Builds Management ---
     refreshBuildsBtn.addEventListener('click', loadBuilds);
 
     uploadBtn.addEventListener('click', async () => {
         const file = fileInput.files[0];
         if (!file) {
-            alert('Please select a .zip file first');
+            showToast('Please select a .zip file first', 'error');
             return;
         }
 
         const formData = new FormData();
         formData.append('file', file);
 
-        uploadStatus.textContent = 'Uploading to AWS... Please wait.';
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '30%'; // Simulated start
         uploadBtn.disabled = true;
 
         try {
@@ -83,52 +159,70 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (res.ok) {
-                uploadStatus.textContent = 'Uploaded successfully!';
+                progressFill.style.width = '100%';
+                showToast('Build uploaded successfully!', 'success');
                 fileInput.value = '';
+                setTimeout(() => {
+                    progressContainer.style.display = 'none';
+                    progressFill.style.width = '0%';
+                }, 1000);
                 loadBuilds();
             } else {
                 const err = await res.json();
-                uploadStatus.textContent = 'Failed: ' + err.error;
+                showToast('Upload failed: ' + err.error, 'error');
+                progressContainer.style.display = 'none';
             }
         } catch (error) {
-            uploadStatus.textContent = 'Network error occurred.';
+            showToast('Network error occurred.', 'error');
+            progressContainer.style.display = 'none';
         } finally {
             uploadBtn.disabled = false;
         }
     });
 
     async function loadBuilds() {
-        buildsList.innerHTML = '<li>Loading...</li>';
-        const res = await fetch('/api/files');
-        const data = await res.json();
+        buildsList.innerHTML = '<li style="color: var(--text-light)">Loading builds...</li>';
+        try {
+            const res = await fetch('/api/files');
+            const data = await res.json();
 
-        buildsList.innerHTML = '';
-        if (data.files.length === 0) {
-            buildsList.innerHTML = '<li>No builds found</li>';
-            return;
+            buildsList.innerHTML = '';
+            if (!data.files || data.files.length === 0) {
+                buildsList.innerHTML = '<li style="color: var(--text-light)">No builds found</li>';
+                return;
+            }
+
+            data.files.forEach(file => {
+                const li = document.createElement('li');
+                const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+                const date = new Date(file.lastModified).toLocaleDateString();
+
+                li.innerHTML = `
+                    <div class="build-info">
+                        <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">${file.key}</a>
+                        <span class="build-meta">${sizeInMB} • ${date}</span>
+                    </div>
+                    ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>` : ''}
+                `;
+                buildsList.appendChild(li);
+            });
+        } catch (e) {
+            buildsList.innerHTML = '<li style="color: var(--danger)">Failed to load builds</li>';
         }
-
-        data.files.forEach(file => {
-            const li = document.createElement('li');
-            const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-            const date = new Date(file.lastModified).toLocaleDateString();
-
-            li.innerHTML = `
-                <div>
-                    <strong><a href="#" onclick="downloadFile('${file.key}'); return false;">${file.key}</a></strong>
-                    <br><small>${sizeInMB} - ${date}</small>
-                </div>
-                ${isAdminUser ? `<button class="delete-btn" onclick="deleteFile('${file.key}')">Remove</button>` : ''}
-            `;
-            buildsList.appendChild(li);
-        });
     }
 
     window.downloadFile = async (key) => {
         let password = "";
         if (!isAdminUser) {
-            password = prompt(`Please enter the password to download: ${key}`);
-            if (password === null) return; // Cancelled
+            password = await showModal({
+                title: 'Download Build',
+                message: `Enter password to download: ${key}`,
+                showInput: true,
+                confirmText: 'Download'
+            });
+            if (password === null) return;
         }
 
         try {
@@ -140,97 +234,126 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (res.ok) {
                 const data = await res.json();
-                // Create a temporary link and trigger download
                 const a = document.createElement('a');
                 a.href = data.url;
                 a.download = key;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+                showToast('Download started');
             } else {
-                alert('Invalid password or error generating link');
+                showToast('Invalid password or access denied', 'error');
             }
         } catch (error) {
-            alert('An error occurred during download request.');
+            showToast('Error requesting download link', 'error');
         }
     };
 
     window.deleteFile = async (key) => {
-        if (!confirm('Are you sure you want to delete this build from AWS S3?')) return;
-
-        const res = await fetch('/api/files/' + encodeURIComponent(key), {
-            method: 'DELETE'
+        const confirmed = await showModal({
+            title: 'Delete Build',
+            message: `Are you sure you want to delete "${key}"? This cannot be undone.`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel'
         });
 
-        if (res.ok) {
-            loadBuilds();
-        } else {
-            alert('Failed to delete build');
+        if (!confirmed) return;
+
+        try {
+            const res = await fetch('/api/files/' + encodeURIComponent(key), {
+                method: 'DELETE'
+            });
+
+            if (res.ok) {
+                showToast('Build deleted successfully', 'success');
+                loadBuilds();
+            } else {
+                showToast('Failed to delete build', 'error');
+            }
+        } catch (e) {
+            showToast('Network error', 'error');
         }
     };
 
-    // Handles Weblinks
-    const linksList = document.getElementById('links-list');
-    const addLinkBtn = document.getElementById('add-link-btn');
-    const linkTitle = document.getElementById('link-title');
-    const linkUrl = document.getElementById('link-url');
-
+    // --- Web Links Management ---
     addLinkBtn.addEventListener('click', async () => {
         if (!linkTitle.value || !linkUrl.value) {
-            alert('Please enter both title and URL');
+            showToast('Please enter both title and URL', 'error');
             return;
         }
 
-        const res = await fetch('/api/links', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: linkTitle.value, url: linkUrl.value })
-        });
+        try {
+            const res = await fetch('/api/links', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: linkTitle.value, url: linkUrl.value })
+            });
 
-        if (res.ok) {
-            linkTitle.value = '';
-            linkUrl.value = '';
-            loadLinks();
-        } else {
-            alert('Failed to add link');
+            if (res.ok) {
+                showToast('Link saved successfully', 'success');
+                linkTitle.value = '';
+                linkUrl.value = '';
+                loadLinks();
+            } else {
+                showToast('Failed to save link', 'error');
+            }
+        } catch (e) {
+            showToast('Network error', 'error');
         }
     });
 
     async function loadLinks() {
-        const res = await fetch('/api/links');
-        const data = await res.json();
+        linksList.innerHTML = '<li style="color: var(--text-light)">Loading links...</li>';
+        try {
+            const res = await fetch('/api/links');
+            const data = await res.json();
 
-        linksList.innerHTML = '';
-        if (data.links.length === 0) {
-            linksList.innerHTML = '<li>No links added yet</li>';
-            return;
+            linksList.innerHTML = '';
+            if (!data.links || data.links.length === 0) {
+                linksList.innerHTML = '<li style="color: var(--text-light)">No links found</li>';
+                return;
+            }
+
+            data.links.forEach(link => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <a href="${link.url}" target="_blank" class="build-name">${link.title}</a>
+                    ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteLink('${link.id}', '${link.title}')" title="Delete">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>` : ''}
+                `;
+                linksList.appendChild(li);
+            });
+        } catch (e) {
+            linksList.innerHTML = '<li style="color: var(--danger)">Failed to load links</li>';
         }
-
-        data.links.forEach(link => {
-            const li = document.createElement('li');
-            li.innerHTML = `
-                <a href="${link.url}" target="_blank">${link.title}</a>
-                ${isAdminUser ? `<button class="delete-btn" onclick="deleteLink('${link.id}')">Remove</button>` : ''}
-            `;
-            linksList.appendChild(li);
-        });
     }
 
-    window.deleteLink = async (id) => {
-        if (!confirm('Are you sure you want to delete this link?')) return;
-
-        const res = await fetch('/api/links/' + id, {
-            method: 'DELETE'
+    window.deleteLink = async (id, title) => {
+        const confirmed = await showModal({
+            title: 'Delete Link',
+            message: `Delete link "${title}"?`,
+            confirmText: 'Delete'
         });
 
-        if (res.ok) {
-            loadLinks();
-        } else {
-            alert('Failed to delete link');
+        if (!confirmed) return;
+
+        try {
+            const res = await fetch('/api/links/' + id, {
+                method: 'DELETE'
+            });
+
+            if (res.ok) {
+                showToast('Link removed', 'success');
+                loadLinks();
+            } else {
+                showToast('Failed to remove link', 'error');
+            }
+        } catch (e) {
+            showToast('Network error', 'error');
         }
     };
 
     // Initial Load
-    loadBuilds();
-    loadLinks();
+    checkAuth();
 });
