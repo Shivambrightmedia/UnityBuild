@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
-    uploadBtn.addEventListener('click', async () => {
+    uploadBtn.addEventListener('click', () => {
         const file = fileInput.files[0];
         if (!file) {
             showToast('Please select a .zip file first', 'error');
@@ -165,16 +165,22 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('buildInfo', buildInfoInput.value);
 
         progressContainer.style.display = 'block';
-        progressFill.style.width = '30%'; 
+        progressFill.style.width = '0%'; 
         uploadBtn.disabled = true;
 
-        try {
-            const res = await fetch('/api/files', {
-                method: 'POST',
-                body: formData
-            });
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/files', true);
 
-            if (res.ok) {
+        // --- Real-time progress tracking ---
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressFill.style.width = percentComplete + '%';
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
                 progressFill.style.width = '100%';
                 showToast('Build uploaded successfully!', 'success');
                 fileInput.value = '';
@@ -186,16 +192,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 1000);
                 loadBuilds();
             } else {
-                const err = await res.json();
-                showToast('Upload failed: ' + err.error, 'error');
+                let errorMsg = 'Upload failed';
+                try {
+                    const err = JSON.parse(xhr.responseText);
+                    errorMsg += ': ' + err.error;
+                } catch(e) {}
+                showToast(errorMsg, 'error');
                 progressContainer.style.display = 'none';
             }
-        } catch (error) {
-            showToast('Network error occurred.', 'error');
-            progressContainer.style.display = 'none';
-        } finally {
             uploadBtn.disabled = false;
-        }
+        };
+
+        xhr.onerror = () => {
+            showToast('Network error occurred during upload.', 'error');
+            progressContainer.style.display = 'none';
+            uploadBtn.disabled = false;
+        };
+
+        xhr.send(formData);
     });
 
     async function loadBuilds() {
