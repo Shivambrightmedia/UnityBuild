@@ -89,7 +89,10 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         data.buildsMetadata[fileName] = {
             eventName: eventName || 'N/A',
-            buildInfo: buildInfo || 'N/A'
+            buildInfo: buildInfo || 'N/A',
+            uploadTime: new Date().toISOString(),
+            downloadCount: 0,
+            lastDownloaded: null
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 
@@ -108,13 +111,19 @@ app.get('/api/files', async (req, res) => {
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         const buildsMetadata = data.buildsMetadata || {};
 
-        const files = (result.Contents || []).map(file => ({
-            key: file.Key,
-            size: file.Size,
-            lastModified: file.LastModified,
-            eventName: buildsMetadata[file.Key]?.eventName || 'N/A',
-            buildInfo: buildsMetadata[file.Key]?.buildInfo || 'N/A'
-        }));
+        const files = (result.Contents || []).map(file => {
+            const meta = buildsMetadata[file.Key] || {};
+            return {
+                key: file.Key,
+                size: file.Size,
+                lastModified: file.LastModified,
+                eventName: meta.eventName || 'N/A',
+                buildInfo: meta.buildInfo || 'N/A',
+                uploadTime: meta.uploadTime || file.LastModified,
+                downloadCount: meta.downloadCount || 0,
+                lastDownloaded: meta.lastDownloaded || null
+            };
+        });
 
         res.json({ files });
     } catch (err) {
@@ -133,6 +142,17 @@ app.post('/api/files/download', async (req, res) => {
 
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
+
+        // Update download statistics
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        if (!data.buildsMetadata[key]) {
+            data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
+        }
+        
+        data.buildsMetadata[key].downloadCount = (data.buildsMetadata[key].downloadCount || 0) + 1;
+        data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
+        
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 
         res.json({ url });
     } catch (err) {
@@ -162,14 +182,11 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
 
 app.get('/api/links', (req, res) => {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
-    
-    // Hide URLs if not admin
     const safeLinks = (data.links || []).map(link => ({
         id: link.id,
         title: link.title,
-        url: req.session.isAdmin ? link.url : null // Only show URL to admins
+        url: req.session.isAdmin ? link.url : null 
     }));
-    
     res.json({ links: safeLinks });
 });
 

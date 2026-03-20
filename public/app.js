@@ -29,6 +29,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let isAdminUser = false;
     let modalResolve = null;
 
+    // --- Helpers ---
+    function formatDateTime(isoString) {
+        if (!isoString) return 'Never';
+        const date = new Date(isoString);
+        return date.toLocaleString();
+    }
+
     // --- Toast Notifications ---
     function showToast(message, type = 'info') {
         const container = document.getElementById('toast-container');
@@ -44,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 3000);
     }
 
-    // --- Custom Modal (Replacement for alert/confirm/prompt) ---
+    // --- Custom Modal ---
     function showModal({ title, message, showInput = false, confirmText = 'Confirm', cancelText = 'Cancel' }) {
         return new Promise((resolve) => {
             modalTitle.textContent = title;
@@ -54,9 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modalConfirmBtn.textContent = confirmText;
             modalCancelBtn.textContent = cancelText;
             modal.style.display = 'flex';
-            
             if (showInput) setTimeout(() => modalInput.focus(), 100);
-
             modalResolve = resolve;
         });
     }
@@ -201,7 +206,8 @@ document.addEventListener('DOMContentLoaded', () => {
             data.files.forEach(file => {
                 const li = document.createElement('li');
                 const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-                const date = new Date(file.lastModified).toLocaleDateString();
+                const uploadTime = formatDateTime(file.uploadTime);
+                const lastDownload = formatDateTime(file.lastDownloaded);
 
                 li.innerHTML = `
                     <div class="build-info">
@@ -209,7 +215,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="build-meta">
                             <strong>Event:</strong> ${file.eventName}<br>
                             <strong>Info:</strong> ${file.buildInfo}<br>
-                            ${sizeInMB} • ${date}
+                            <strong>Uploaded:</strong> ${uploadTime} (${sizeInMB})<br>
+                            <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${lastDownload}
                         </span>
                     </div>
                     ${isAdminUser ? `<button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
@@ -251,6 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 a.click();
                 document.body.removeChild(a);
                 showToast('Download started');
+                setTimeout(loadBuilds, 1000); // Refresh stats
             } else {
                 showToast('Invalid password or access denied', 'error');
             }
@@ -340,9 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.accessLink = async (event, id, directUrl) => {
-        // If we are admin or the URL is already provided (for admins), let the link work normally
         if (isAdminUser && directUrl) return;
-
         event.preventDefault();
 
         const password = await showModal({
