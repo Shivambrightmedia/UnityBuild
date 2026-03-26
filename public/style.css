@@ -180,6 +180,28 @@ main {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 0.75rem;
+}
+
+.date-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.date-filter input[type="date"] {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text-light);
+    background: #f9fafb;
+}
+
+.date-sep {
+    font-size: 0.75rem;
+    color: var(--text-light);
 }
 
 .column-header h2 {

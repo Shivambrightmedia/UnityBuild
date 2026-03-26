@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const progressContainer = document.getElementById('upload-progress-container');
     const progressFill = document.getElementById('progress-fill');
     const buildSearchInput = document.getElementById('build-search');
+    const startDateInput = document.getElementById('start-date');
+    const endDateInput = document.getElementById('end-date');
 
     // Modal Elements
     const modal = document.getElementById('custom-modal');
@@ -152,6 +154,9 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
+    startDateInput.addEventListener('change', () => renderBuilds(buildSearchInput.value.toLowerCase()));
+    endDateInput.addEventListener('change', () => renderBuilds(buildSearchInput.value.toLowerCase()));
+
     uploadBtn.addEventListener('click', () => {
         const file = fileInput.files[0];
         if (!file) {
@@ -165,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('buildInfo', buildInfoInput.value);
 
         progressContainer.style.display = 'block';
-        progressFill.style.width = '0%'; 
+        progressFill.style.width = '0%';
         uploadBtn.disabled = true;
 
         const xhr = new XMLHttpRequest();
@@ -195,7 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const err = JSON.parse(xhr.responseText);
                     errorMsg += ': ' + err.error;
-                } catch(e) {}
+                } catch (e) { }
                 showToast(errorMsg, 'error');
                 progressContainer.style.display = 'none';
             }
@@ -225,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderBuilds(filter = '') {
         buildsList.innerHTML = '';
-        
+
         // Sort: Pinned first, then by date descending
         const sortedBuilds = [...allBuilds].sort((a, b) => {
             if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
@@ -234,7 +239,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const filtered = sortedBuilds.filter(file => {
             const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
-            return searchStr.includes(filter);
+            const matchesSearch = searchStr.includes(filter);
+
+            const fileDate = new Date(file.uploadTime);
+            let matchesDate = true;
+
+            if (startDateInput.value) {
+                const start = new Date(startDateInput.value);
+                start.setHours(0, 0, 0, 0);
+                if (fileDate < start) matchesDate = false;
+            }
+            if (endDateInput.value) {
+                const end = new Date(endDateInput.value);
+                end.setHours(23, 59, 59, 999);
+                if (fileDate > end) matchesDate = false;
+            }
+
+            return matchesSearch && matchesDate;
         });
 
         if (filtered.length === 0) {
@@ -245,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
         filtered.forEach(file => {
             const li = document.createElement('li');
             if (file.pinned) li.classList.add('pinned-item');
-            
+
             const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
             const uploadTime = formatDateTime(file.uploadTime);
             const lastDownload = formatDateTime(file.lastDownloaded);
@@ -317,7 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 a.click();
                 document.body.removeChild(a);
                 showToast('Download started');
-                setTimeout(loadBuilds, 1000); 
+                setTimeout(loadBuilds, 1000);
             } else {
                 showToast('Invalid password or access denied', 'error');
             }
@@ -388,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/links');
             const data = await res.json();
-            
+
             // Sort: Pinned first
             const sortedLinks = (data.links || []).sort((a, b) => (a.pinned === b.pinned) ? 0 : a.pinned ? -1 : 1);
 
@@ -401,7 +422,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sortedLinks.forEach(link => {
                 const li = document.createElement('li');
                 if (link.pinned) li.classList.add('pinned-item');
-                
+
                 li.innerHTML = `
                     <div class="build-info">
                         <a href="${link.url || '#'}" target="_blank" class="build-name" onclick="window.accessLink(event, '${link.id}', '${link.url}')">
