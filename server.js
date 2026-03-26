@@ -88,7 +88,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage: storage, limits: { fileSize: 1000 * 1024 * 1024 } });
+const upload = multer({ storage: storage, limits: { fileSize: 3000 * 1024 * 1024 } });
 
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
@@ -186,16 +186,16 @@ app.post('/api/files/:key/pin', requireAuth, async (req, res) => {
     try {
         const { key } = req.params;
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
-        
+
         if (!data.buildsMetadata[key]) {
             data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', pinned: false };
         }
-        
+
         data.buildsMetadata[key].pinned = !data.buildsMetadata[key].pinned;
-        
+
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
-        
+
         res.json({ success: true, pinned: data.buildsMetadata[key].pinned });
     } catch (err) {
         res.status(500).json({ error: 'Failed to pin file' });
@@ -217,7 +217,7 @@ app.post('/api/files/download', async (req, res) => {
         }
         data.buildsMetadata[key].downloadCount = (data.buildsMetadata[key].downloadCount || 0) + 1;
         data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
-        
+
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
         res.json({ url });
@@ -250,7 +250,7 @@ app.get('/api/links', (req, res) => {
         id: link.id,
         title: link.title,
         pinned: link.pinned || false,
-        url: req.session.isAdmin ? link.url : null 
+        url: req.session.isAdmin ? link.url : null
     }));
     res.json({ links: safeLinks });
 });
@@ -261,7 +261,7 @@ app.post('/api/links/:id/pin', requireAuth, async (req, res) => {
         const { id } = req.params;
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         const link = (data.links || []).find(l => l.id === id);
-        
+
         if (link) {
             link.pinned = !link.pinned;
             fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
