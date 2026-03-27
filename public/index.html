@@ -61,12 +61,14 @@
                 <div class="column-header">
                     <h2>Stored Builds</h2>
                     <div class="quick-filters">
-                        <button class="filter-chip active" data-range="all">All</button>
-                        <button class="filter-chip" data-range="today">Today</button>
-                        <button class="filter-chip" data-range="week">This Week</button>
-                        <button class="filter-chip" data-range="month">This Month</button>
-                        <button class="filter-chip" data-range="6month">6 Months</button>
-                        <button class="filter-chip" data-range="year">Year</button>
+                        <select id="quick-range-select" class="range-select">
+                            <option value="all">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="6month">Last 6 Months</option>
+                            <option value="year">Last Year</option>
+                        </select>
                     </div>
                     <div class="date-filter">
                         <input type="date" id="start-date" title="Start Date">
@@ -83,7 +85,8 @@
                     </button>
                 </div>
                 <div class="search-container">
-                    <input type="text" id="build-search" placeholder="Search by event or build name..." class="search-input">
+                    <input type="text" id="build-search" placeholder="Search by event or build name..."
+                        class="search-input">
                 </div>
                 <ul id="builds-list" class="list"></ul>
             </div>

@@ -155,72 +155,63 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     startDateInput.addEventListener('change', () => {
-        clearActiveChips();
+        quickRangeSelect.value = 'all';
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
     endDateInput.addEventListener('change', () => {
-        clearActiveChips();
+        quickRangeSelect.value = 'all';
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
-    // Quick Filter Chips
-    const filterChips = document.querySelectorAll('.filter-chip');
+    // Quick Filter Range
+    const quickRangeSelect = document.getElementById('quick-range-select');
 
-    function clearActiveChips() {
-        filterChips.forEach(c => c.classList.remove('active'));
+    function toYMD(date) {
+        if (!date) return '';
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
-    filterChips.forEach(chip => {
-        chip.addEventListener('click', () => {
-            clearActiveChips();
-            chip.classList.add('active');
+    quickRangeSelect.addEventListener('change', () => {
+        const range = quickRangeSelect.value;
+        const now = new Date();
+        let start = null;
 
-            const range = chip.dataset.range;
-            const now = new Date();
-            let start = null;
-            let end = null;
+        switch (range) {
+            case 'today':
+                start = new Date(now);
+                start.setHours(0, 0, 0, 0);
+                break;
+            case 'week':
+                const day = now.getDay();
+                const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+                start = new Date(now);
+                start.setDate(diff);
+                start.setHours(0, 0, 0, 0);
+                break;
+            case 'month':
+                start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+                break;
+            case '6month':
+                start = new Date(now);
+                start.setMonth(start.getMonth() - 6);
+                start.setHours(0, 0, 0, 0);
+                break;
+            case 'year':
+                start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                break;
+            case 'all':
+            default:
+                start = null;
+                break;
+        }
 
-            switch (range) {
-                case 'today':
-                    start = new Date(now);
-                    start.setHours(0, 0, 0, 0);
-                    break;
-                case 'week':
-                    const day = now.getDay();
-                    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-                    start = new Date(now);
-                    start.setDate(diff);
-                    start.setHours(0, 0, 0, 0);
-                    break;
-                case 'month':
-                    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-                    break;
-                case '6month':
-                    start = new Date(now);
-                    start.setMonth(start.getMonth() - 6);
-                    start.setHours(0, 0, 0, 0);
-                    break;
-                case 'year':
-                    start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
-                    break;
-                case 'all':
-                default:
-                    start = null;
-                    break;
-            }
+        startDateInput.value = toYMD(start);
+        endDateInput.value = ''; // Clear end date for quick ranges
 
-            if (start) {
-                startDateInput.value = start.toISOString().split('T')[0];
-            } else {
-                startDateInput.value = '';
-            }
-            
-            // For these quick filters, we usually want to clear the end date to show everything from start onwards
-            // except for 'all' which clears everything.
-            endDateInput.value = '';
-
-            renderBuilds(buildSearchInput.value.toLowerCase());
-        });
+        renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
     uploadBtn.addEventListener('click', () => {
@@ -311,13 +302,13 @@ document.addEventListener('DOMContentLoaded', () => {
             let matchesDate = true;
 
             if (startDateInput.value) {
-                const start = new Date(startDateInput.value);
-                start.setHours(0, 0, 0, 0);
+                const [y, m, d] = startDateInput.value.split('-').map(Number);
+                const start = new Date(y, m - 1, d, 0, 0, 0, 0);
                 if (fileDate < start) matchesDate = false;
             }
             if (endDateInput.value) {
-                const end = new Date(endDateInput.value);
-                end.setHours(23, 59, 59, 999);
+                const [y, m, d] = endDateInput.value.split('-').map(Number);
+                const end = new Date(y, m - 1, d, 23, 59, 59, 999);
                 if (fileDate > end) matchesDate = false;
             }
 
