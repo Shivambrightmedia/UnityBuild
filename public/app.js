@@ -154,8 +154,74 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
-    startDateInput.addEventListener('change', () => renderBuilds(buildSearchInput.value.toLowerCase()));
-    endDateInput.addEventListener('change', () => renderBuilds(buildSearchInput.value.toLowerCase()));
+    startDateInput.addEventListener('change', () => {
+        clearActiveChips();
+        renderBuilds(buildSearchInput.value.toLowerCase());
+    });
+    endDateInput.addEventListener('change', () => {
+        clearActiveChips();
+        renderBuilds(buildSearchInput.value.toLowerCase());
+    });
+
+    // Quick Filter Chips
+    const filterChips = document.querySelectorAll('.filter-chip');
+
+    function clearActiveChips() {
+        filterChips.forEach(c => c.classList.remove('active'));
+    }
+
+    filterChips.forEach(chip => {
+        chip.addEventListener('click', () => {
+            clearActiveChips();
+            chip.classList.add('active');
+
+            const range = chip.dataset.range;
+            const now = new Date();
+            let start = null;
+            let end = null;
+
+            switch (range) {
+                case 'today':
+                    start = new Date(now);
+                    start.setHours(0, 0, 0, 0);
+                    break;
+                case 'week':
+                    const day = now.getDay();
+                    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+                    start = new Date(now);
+                    start.setDate(diff);
+                    start.setHours(0, 0, 0, 0);
+                    break;
+                case 'month':
+                    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+                    break;
+                case '6month':
+                    start = new Date(now);
+                    start.setMonth(start.getMonth() - 6);
+                    start.setHours(0, 0, 0, 0);
+                    break;
+                case 'year':
+                    start = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
+                    break;
+                case 'all':
+                default:
+                    start = null;
+                    break;
+            }
+
+            if (start) {
+                startDateInput.value = start.toISOString().split('T')[0];
+            } else {
+                startDateInput.value = '';
+            }
+            
+            // For these quick filters, we usually want to clear the end date to show everything from start onwards
+            // except for 'all' which clears everything.
+            endDateInput.value = '';
+
+            renderBuilds(buildSearchInput.value.toLowerCase());
+        });
+    });
 
     uploadBtn.addEventListener('click', () => {
         const file = fileInput.files[0];
