@@ -28,6 +28,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalInput = document.getElementById('modal-input');
     const modalCancelBtn = document.getElementById('modal-cancel-btn');
     const modalConfirmBtn = document.getElementById('modal-confirm-btn');
+    
+    // Drag & Drop Elements
+    const dropOverlay = document.getElementById('drop-overlay');
+    const buildDetailsModal = document.getElementById('build-details-modal');
+    const droppedFileName = document.getElementById('dropped-file-name');
+    const modalEventName = document.getElementById('modal-event-name');
+    const modalBuildInfo = document.getElementById('modal-build-info');
+    const buildModalCancelBtn = document.getElementById('build-modal-cancel-btn');
+    const buildModalConfirmBtn = document.getElementById('build-modal-confirm-btn');
+
 
     let isAdminUser = false;
     let modalResolve = null;
@@ -214,17 +224,11 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBuilds(buildSearchInput.value.toLowerCase());
     });
 
-    uploadBtn.addEventListener('click', () => {
-        const file = fileInput.files[0];
-        if (!file) {
-            showToast('Please select a .zip file first', 'error');
-            return;
-        }
-
+    function performUpload(file, eventName, buildInfo) {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('eventName', eventNameInput.value);
-        formData.append('buildInfo', buildInfoInput.value);
+        formData.append('eventName', eventName);
+        formData.append('buildInfo', buildInfo);
 
         progressContainer.style.display = 'block';
         progressFill.style.width = '0%';
@@ -247,6 +251,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 fileInput.value = '';
                 eventNameInput.value = '';
                 buildInfoInput.value = '';
+                modalEventName.value = '';
+                modalBuildInfo.value = '';
                 setTimeout(() => {
                     progressContainer.style.display = 'none';
                     progressFill.style.width = '0%';
@@ -271,7 +277,88 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         xhr.send(formData);
+    }
+
+    uploadBtn.addEventListener('click', () => {
+        const file = fileInput.files[0];
+        if (!file) {
+            showToast('Please select a .zip file first', 'error');
+            return;
+        }
+        performUpload(file, eventNameInput.value, buildInfoInput.value);
     });
+
+    // --- Drag and Drop Management ---
+    let pendingFile = null;
+
+    window.addEventListener('dragenter', (e) => {
+        if (!isAdminUser) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer.types.includes('Files')) {
+            dropOverlay.classList.add('active');
+        }
+    });
+
+    window.addEventListener('dragover', (e) => {
+        if (!isAdminUser) return;
+        e.preventDefault();
+        e.stopPropagation();
+    });
+
+    dropOverlay.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropOverlay.classList.remove('active');
+    });
+
+    window.addEventListener('drop', (e) => {
+        if (!isAdminUser) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dropOverlay.classList.remove('active');
+
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            const file = files[0];
+            if (file.name.toLowerCase().endsWith('.zip')) {
+                pendingFile = file;
+                openBuildDetailsModal(file.name);
+            } else {
+                showToast('Only ZIP folders/files are allowed', 'error');
+            }
+        }
+    });
+
+    function openBuildDetailsModal(fileName) {
+        droppedFileName.textContent = `File: ${fileName}`;
+        modalEventName.value = '';
+        modalBuildInfo.value = '';
+        buildDetailsModal.style.display = 'flex';
+        setTimeout(() => modalEventName.focus(), 100);
+    }
+
+    buildModalCancelBtn.addEventListener('click', () => {
+        buildDetailsModal.style.display = 'none';
+        pendingFile = null;
+    });
+
+    buildModalConfirmBtn.addEventListener('click', () => {
+        if (!pendingFile) return;
+        
+        const eventName = modalEventName.value.trim();
+        const buildInfo = modalBuildInfo.value.trim();
+
+        if (!eventName) {
+            showToast('Event Name is required', 'error');
+            return;
+        }
+
+        buildDetailsModal.style.display = 'none';
+        performUpload(pendingFile, eventName, buildInfo);
+        pendingFile = null;
+    });
+
 
     async function loadBuilds() {
         buildsList.innerHTML = '<li style="color: var(--text-light)">Loading builds...</li>';

@@ -439,3 +439,36 @@ main {
         transform: translateY(0);
     }
 }
+
+/* Drag and Drop Overlay */
+.drop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(79, 70, 229, 0.9);
+    z-index: 3000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    backdrop-filter: blur(4px);
+}
+
+.drop-overlay.active {
+    display: flex;
+}
+
+.drop-message {
+    text-align: center;
+}
+
+.drop-message svg {
+    margin-bottom: 1rem;
+}
+
+.drop-message p {
+    font-size: 1.5rem;
+    font-weight: 700;
+}

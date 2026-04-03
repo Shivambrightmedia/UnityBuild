@@ -12,6 +12,17 @@
 </head>
 
 <body>
+    <div id="drop-overlay" class="drop-overlay">
+        <div class="drop-message">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            <p>Drop ZIP file to upload build</p>
+        </div>
+    </div>
+
     <header>
         <div class="header-content">
             <h1>Unity Build Storage</h1>
@@ -115,7 +126,24 @@
         </div>
     </div>
 
+    <!-- Build Details Modal -->
+    <div id="build-details-modal" class="modal-overlay" style="display: none; z-index: 2000;">
+        <div class="modal-content">
+            <h3>Upload Build Details</h3>
+            <p id="dropped-file-name" style="font-weight: 600; color: var(--primary); margin: 0.5rem 0 1.5rem 0; font-size: 0.9rem; text-align: center; background: #eef2ff; padding: 0.5rem; border-radius: 4px;"></p>
+            <div class="input-stack" style="gap: 1rem; margin-bottom: 1.5rem;">
+                <input type="text" id="modal-event-name" placeholder="Event Name (e.g. CES 2024)" style="width: 100%; box-sizing: border-box;">
+                <input type="text" id="modal-build-info" placeholder="Build Info (e.g. v1.0.4 - WebGL)" style="width: 100%; box-sizing: border-box;">
+            </div>
+            <div class="modal-actions">
+                <button id="build-modal-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="build-modal-confirm-btn" class="primary-btn">Upload Build</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
+
     <div id="toast-container"></div>
 
     <script src="app.js"></script>
