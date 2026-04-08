@@ -8,12 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
-
-// Health check for Render
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', port: PORT, uptime: process.uptime() });
-});
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static('public'));
 app.use(express.json());
@@ -311,14 +306,6 @@ app.delete('/api/links/:id', requireAuth, async (req, res) => {
     res.json({ success: true });
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-    console.log("Server running on port " + PORT);
-});
-
-// Prevent silent crashes
-process.on('uncaughtException', (err) => {
-    console.error('UNCAUGHT EXCEPTION:', err);
-});
-process.on('unhandledRejection', (err) => {
-    console.error('UNHANDLED REJECTION:', err);
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
