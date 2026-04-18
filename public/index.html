@@ -37,7 +37,23 @@
 
     <main>
         <div id="admin-panel" style="display: none;" class="panel fade-in">
-            <h2>Admin Controls</h2>
+            <div class="panel-header">
+                <h2>Admin Controls</h2>
+                <div id="usage-stats" class="usage-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Cloud Usage:</span>
+                        <span id="total-storage" class="stat-value">0.00 GB</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Files:</span>
+                        <span id="total-files" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">AWS Config:</span>
+                        <span id="aws-info" class="stat-value" style="font-size: 0.8rem;">Loading...</span>
+                    </div>
+                </div>
+            </div>
 
             <div class="admin-grid">
                 <div class="admin-section">

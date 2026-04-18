@@ -149,6 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
             passwordInput.style.display = 'none';
             logoutBtn.style.display = 'inline-block';
             adminPanel.style.display = 'block';
+            loadAWSInfo();
         } else {
             loginBtn.style.display = 'inline-block';
             passwordInput.style.display = 'inline-block';
@@ -157,6 +158,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         loadAllFiles();
         loadLinks();
+    }
+
+    async function loadAWSInfo() {
+        const infoEl = document.getElementById('aws-info');
+        if (!infoEl) return;
+        try {
+            const res = await fetch('/api/aws-info');
+            const data = await res.json();
+            infoEl.textContent = `${data.bucket} (${data.region})`;
+        } catch (e) {
+            infoEl.textContent = 'Error loading';
+        }
     }
 
     // --- Builds Management ---
@@ -389,10 +402,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/files');
             const data = await res.json();
             allFiles = data.files || [];
+            
+            // Update stats
+            updateStorageStats(allFiles);
+            
             renderFiles();
         } catch (e) {
             buildsList.innerHTML = '<li style="color: var(--danger)">Failed to load</li>';
         }
+    }
+
+    function updateStorageStats(files) {
+        const totalSizeBytes = files.reduce((acc, file) => acc + (file.size || 0), 0);
+        const totalGB = (totalSizeBytes / (1024 * 1024 * 1024)).toFixed(2);
+        
+        const storageEl = document.getElementById('total-storage');
+        const filesEl = document.getElementById('total-files');
+        
+        if (storageEl) storageEl.textContent = `${totalGB} GB`;
+        if (filesEl) filesEl.textContent = files.length;
     }
 
     function renderFiles(filter = '') {

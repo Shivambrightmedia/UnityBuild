@@ -133,6 +133,47 @@ main {
     gap: 2rem;
 }
 
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.panel-header h2 {
+    margin: 0;
+}
+
+.usage-stats {
+    display: flex;
+    gap: 2rem;
+    background: #f8fafc;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius);
+    border: 1px solid #e2e8f0;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+.stat-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
 .admin-section h3 {
     margin-top: 0;
     font-size: 1rem;

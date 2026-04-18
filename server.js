@@ -105,6 +105,13 @@ app.get('/api/auth/status', (req, res) => {
     res.json({ isAdmin: !!req.session.isAdmin });
 });
 
+app.get('/api/aws-info', requireAuth, (req, res) => {
+    res.json({
+        bucket: BUCKET_NAME,
+        region: process.env.AWS_REGION || 'us-east-1'
+    });
+});
+
 app.post('/api/logout', (req, res) => {
     req.session.destroy();
     res.json({ success: true });
