@@ -163,12 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshFilesBtn.addEventListener('click', loadAllFiles);
 
     viewTypeSelect.addEventListener('change', () => {
-        const type = viewTypeSelect.value;
-        if (type === 'asset') {
-            buildFilters.style.display = 'none';
-        } else {
-            buildFilters.style.display = 'flex';
-        }
         renderFiles();
     });
 
@@ -416,8 +410,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const filtered = sorted.filter(file => {
             const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
             const matchesSearch = searchStr.includes(filter);
-
-            if (type === 'asset') return matchesSearch;
 
             const fileDate = new Date(file.uploadTime);
             let matchesDate = true;
