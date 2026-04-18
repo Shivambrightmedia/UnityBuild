@@ -218,13 +218,19 @@ app.post('/api/files/:key/pin', requireAuth, async (req, res) => {
 app.post('/api/files/download', async (req, res) => {
     try {
         const { key, password } = req.body;
-        if (!req.session.isAdmin && password !== ACCESS_PASSWORD) {
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+        let fileType = 'build';
+        if (data.assetsMetadata && data.assetsMetadata[key]) fileType = 'asset';
+
+        const requiredPassword = fileType === 'asset' ? ADMIN_PASSWORD : ACCESS_PASSWORD;
+
+        if (!req.session.isAdmin && password !== requiredPassword) {
             return res.status(401).json({ error: 'Invalid access password' });
         }
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
 
-        const data = JSON.parse(fs.readFileSync(DATA_FILE));
         let metaSource = 'buildsMetadata';
         if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
 
