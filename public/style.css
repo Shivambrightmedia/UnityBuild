@@ -175,8 +175,30 @@ main {
 
 .content-section {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    grid-template-columns: 1.5fr 1fr;
     gap: 2rem;
+}
+
+.view-select {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    outline: none;
+}
+
+.view-select:hover {
+    color: var(--primary);
+}
+
+.header-tools {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: auto;
 }
 
 @media (max-width: 768px) {
