@@ -488,11 +488,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.downloadFile = async (key) => {
+        const file = allFiles.find(f => f.key === key);
+        const isAsset = file && file.type === 'asset';
+        
         let password = "";
         if (!isAdminUser) {
             password = await showModal({
-                title: 'Download Build',
-                message: `Enter password to download: ${key}`,
+                title: isAsset ? 'Download Asset' : 'Download Build',
+                message: isAsset ? `Enter Asset Password to download: ${key}` : `Enter Viewer Password to download: ${key}`,
                 showInput: true,
                 confirmText: 'Download'
             });

@@ -31,6 +31,7 @@ const BUCKET_NAME = process.env.S3_BUCKET_NAME || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer';
+const ASSET_PASSWORD = process.env.ASSET_PASSWORD || 'asset123';
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
@@ -223,7 +224,7 @@ app.post('/api/files/download', async (req, res) => {
         let fileType = 'build';
         if (data.assetsMetadata && data.assetsMetadata[key]) fileType = 'asset';
 
-        const requiredPassword = fileType === 'asset' ? ADMIN_PASSWORD : ACCESS_PASSWORD;
+        const requiredPassword = fileType === 'asset' ? ASSET_PASSWORD : ACCESS_PASSWORD;
 
         if (!req.session.isAdmin && password !== requiredPassword) {
             return res.status(401).json({ error: 'Invalid access password' });
