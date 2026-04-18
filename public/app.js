@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const buildInfoInput = document.getElementById('build-info');
     const buildsList = document.getElementById('builds-list');
     const refreshBuildsBtn = document.getElementById('refresh-builds-btn');
+    const assetsList = document.getElementById('assets-list');
+    const refreshAssetsBtn = document.getElementById('refresh-assets-btn');
     const linksList = document.getElementById('links-list');
     const addLinkBtn = document.getElementById('add-link-btn');
     const linkTitle = document.getElementById('link-title');
@@ -17,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const progressContainer = document.getElementById('upload-progress-container');
     const progressFill = document.getElementById('progress-fill');
     const buildSearchInput = document.getElementById('build-search');
+    const assetSearchInput = document.getElementById('asset-search');
     const startDateInput = document.getElementById('start-date');
     const endDateInput = document.getElementById('end-date');
 
@@ -28,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalInput = document.getElementById('modal-input');
     const modalCancelBtn = document.getElementById('modal-cancel-btn');
     const modalConfirmBtn = document.getElementById('modal-confirm-btn');
-    
+
     // Drag & Drop Elements
     const dropOverlay = document.getElementById('drop-overlay');
     const buildDetailsModal = document.getElementById('build-details-modal');
@@ -41,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let isAdminUser = false;
     let modalResolve = null;
-    let allBuilds = [];
+    let allFiles = [];
 
     // --- Helpers ---
     function formatDateTime(isoString) {
@@ -153,15 +156,20 @@ document.addEventListener('DOMContentLoaded', () => {
             logoutBtn.style.display = 'none';
             adminPanel.style.display = 'none';
         }
-        loadBuilds();
+        loadAllFiles();
         loadLinks();
     }
 
     // --- Builds Management ---
-    refreshBuildsBtn.addEventListener('click', loadBuilds);
+    refreshBuildsBtn.addEventListener('click', loadAllFiles);
+    refreshAssetsBtn.addEventListener('click', loadAllFiles);
 
     buildSearchInput.addEventListener('input', () => {
         renderBuilds(buildSearchInput.value.toLowerCase());
+    });
+
+    assetSearchInput.addEventListener('input', () => {
+        renderAssets(assetSearchInput.value.toLowerCase());
     });
 
     startDateInput.addEventListener('change', () => {
@@ -226,9 +234,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function performUpload(file, eventName, buildInfo) {
         const formData = new FormData();
+
+        let type = 'build';
+        if (modal.style.display === 'flex') {
+            // Unused in this context but keeping for safety
+        }
+
+        // Check for active upload source
+        const buildModal = document.getElementById('build-details-modal');
+        if (buildModal.style.display === 'flex') {
+            type = document.querySelector('input[name="modal-upload-type"]:checked').value;
+        } else {
+            type = document.querySelector('input[name="upload-type"]:checked').value;
+        }
+
         formData.append('file', file);
         formData.append('eventName', eventName);
         formData.append('buildInfo', buildInfo);
+        formData.append('type', type);
 
         progressContainer.style.display = 'block';
         progressFill.style.width = '0%';
@@ -257,7 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     progressContainer.style.display = 'none';
                     progressFill.style.width = '0%';
                 }, 1000);
-                loadBuilds();
+                loadAllFiles();
             } else {
                 let errorMsg = 'Upload failed';
                 try {
@@ -331,6 +354,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function openBuildDetailsModal(fileName) {
+        const header = document.getElementById('build-modal-header');
+        header.textContent = `Upload Details: ${fileName}`;
         droppedFileName.textContent = `File: ${fileName}`;
         modalEventName.value = '';
         modalBuildInfo.value = '';
@@ -345,7 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     buildModalConfirmBtn.addEventListener('click', () => {
         if (!pendingFile) return;
-        
+
         const eventName = modalEventName.value.trim();
         const buildInfo = modalBuildInfo.value.trim();
 
@@ -360,23 +385,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    async function loadBuilds() {
-        buildsList.innerHTML = '<li style="color: var(--text-light)">Loading builds...</li>';
+    async function loadAllFiles() {
+        buildsList.innerHTML = '<li style="color: var(--text-light)">Loading...</li>';
+        assetsList.innerHTML = '<li style="color: var(--text-light)">Loading...</li>';
         try {
             const res = await fetch('/api/files');
             const data = await res.json();
-            allBuilds = data.files || [];
+            allFiles = data.files || [];
             renderBuilds();
+            renderAssets();
         } catch (e) {
-            buildsList.innerHTML = '<li style="color: var(--danger)">Failed to load builds</li>';
+            buildsList.innerHTML = '<li style="color: var(--danger)">Failed to load</li>';
+            assetsList.innerHTML = '<li style="color: var(--danger)">Failed to load</li>';
         }
     }
 
     function renderBuilds(filter = '') {
         buildsList.innerHTML = '';
 
+        const builds = allFiles.filter(f => f.type === 'build');
+
         // Sort: Pinned first, then by date descending
-        const sortedBuilds = [...allBuilds].sort((a, b) => {
+        const sortedBuilds = [...builds].sort((a, b) => {
             if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
             return new Date(b.uploadTime) - new Date(a.uploadTime);
         });
@@ -403,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (filtered.length === 0) {
-            buildsList.innerHTML = `<li style="color: var(--text-light)">${allBuilds.length === 0 ? 'No builds found' : 'No matching results'}</li>`;
+            buildsList.innerHTML = `<li style="color: var(--text-light)">${builds.length === 0 ? 'No builds found' : 'No matching results'}</li>`;
             return;
         }
 
@@ -418,10 +448,10 @@ document.addEventListener('DOMContentLoaded', () => {
             li.innerHTML = `
                 <div class="build-info">
                     <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">
-                        ${file.pinned ? '<span class="pin-icon">Γ£┬ö</span> ' : ''}${file.key}
+                        ${file.pinned ? '<span class="pin-icon">📍</span> ' : ''}${file.key}
                     </a>
                     <span class="build-meta">
-                        <strong>Event:</strong> ${file.eventName}<br>
+                        <strong>Name:</strong> ${file.eventName}<br>
                         <strong>Info:</strong> ${file.buildInfo}<br>
                         <strong>Uploaded:</strong> ${uploadTime} (${sizeInMB})<br>
                         <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${lastDownload}
@@ -442,11 +472,64 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function renderAssets(filter = '') {
+        assetsList.innerHTML = '';
+
+        const assets = allFiles.filter(f => f.type === 'asset');
+
+        const sortedAssets = [...assets].sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+            return new Date(b.uploadTime) - new Date(a.uploadTime);
+        });
+
+        const filtered = sortedAssets.filter(file => {
+            const searchStr = `${file.key} ${file.eventName}`.toLowerCase();
+            return searchStr.includes(filter);
+        });
+
+        if (filtered.length === 0) {
+            assetsList.innerHTML = `<li style="color: var(--text-light)">${assets.length === 0 ? 'No assets found' : 'No matching results'}</li>`;
+            return;
+        }
+
+        filtered.forEach(file => {
+            const li = document.createElement('li');
+            if (file.pinned) li.classList.add('pinned-item');
+
+            const sizeInMB = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+            const uploadTime = formatDateTime(file.uploadTime);
+
+            li.innerHTML = `
+                <div class="build-info">
+                    <a href="#" class="build-name" onclick="event.preventDefault(); window.downloadFile('${file.key}')">
+                        ${file.pinned ? '<span class="pin-icon">📍</span> ' : ''}${file.key}
+                    </a>
+                    <span class="build-meta">
+                        <strong>Category:</strong> ${file.eventName}<br>
+                        <strong>Info:</strong> ${file.buildInfo}<br>
+                        <strong>Stored:</strong> ${uploadTime} (${sizeInMB})
+                    </span>
+                </div>
+                <div class="item-actions">
+                    ${isAdminUser ? `
+                        <button class="pin-btn icon-btn ${file.pinned ? 'active' : ''}" onclick="window.togglePinFile('${file.key}')" title="${file.pinned ? 'Unpin' : 'Pin'}">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                        </button>
+                        <button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+            assetsList.appendChild(li);
+        });
+    }
+
     window.togglePinFile = async (key) => {
         try {
             const res = await fetch(`/api/files/${encodeURIComponent(key)}/pin`, { method: 'POST' });
             if (res.ok) {
-                loadBuilds();
+                loadAllFiles();
                 showToast('Pin status updated');
             }
         } catch (e) {
@@ -482,7 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 a.click();
                 document.body.removeChild(a);
                 showToast('Download started');
-                setTimeout(loadBuilds, 1000);
+                setTimeout(loadAllFiles, 1000);
             } else {
                 showToast('Invalid password or access denied', 'error');
             }
@@ -510,8 +593,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (res.ok) {
-                showToast('Build deleted successfully', 'success');
-                loadBuilds();
+                showToast('Deleted successfully', 'success');
+                loadAllFiles();
             } else {
                 const err = await res.json();
                 showToast(err.error || 'Failed to delete build', 'error');

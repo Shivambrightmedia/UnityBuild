@@ -37,7 +37,7 @@ const S3_DATA_KEY = 'persistent_data.json';
 
 // --- Initialize Local Data File ---
 if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {} }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {}, assetsMetadata: {} }));
 }
 
 // --- S3 Persistence Helpers ---
@@ -130,13 +130,19 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
         fs.unlinkSync(filePath);
 
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
-        data.buildsMetadata[fileName] = {
+        const type = req.body.type || 'build';
+        const metadataKey = type === 'asset' ? 'assetsMetadata' : 'buildsMetadata';
+
+        if (!data[metadataKey]) data[metadataKey] = {};
+
+        data[metadataKey][fileName] = {
             eventName: eventName || 'N/A',
             buildInfo: buildInfo || 'N/A',
             uploadTime: new Date().toISOString(),
             downloadCount: 0,
             lastDownloaded: null,
-            pinned: false
+            pinned: false,
+            type: type
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
@@ -156,11 +162,13 @@ app.get('/api/files', async (req, res) => {
         const result = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET_NAME }));
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
         const buildsMetadata = data.buildsMetadata || {};
+        const assetsMetadata = data.assetsMetadata || {};
 
         const files = (result.Contents || [])
             .filter(file => file.Key !== S3_DATA_KEY)
             .map(file => {
-                const meta = buildsMetadata[file.Key] || {};
+                const meta = buildsMetadata[file.Key] || assetsMetadata[file.Key] || {};
+                const type = buildsMetadata[file.Key] ? 'build' : (assetsMetadata[file.Key] ? 'asset' : 'build');
                 return {
                     key: file.Key,
                     size: file.Size,
@@ -170,7 +178,8 @@ app.get('/api/files', async (req, res) => {
                     uploadTime: meta.uploadTime || file.LastModified,
                     downloadCount: meta.downloadCount || 0,
                     lastDownloaded: meta.lastDownloaded || null,
-                    pinned: meta.pinned || false
+                    pinned: meta.pinned || false,
+                    type: type
                 };
             });
 
@@ -187,16 +196,20 @@ app.post('/api/files/:key/pin', requireAuth, async (req, res) => {
         const { key } = req.params;
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
 
-        if (!data.buildsMetadata[key]) {
-            data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', pinned: false };
+        let metaSource = 'buildsMetadata';
+        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+        else if (!data.buildsMetadata[key]) metaSource = 'buildsMetadata';
+
+        if (!data[metaSource][key]) {
+            data[metaSource][key] = { eventName: 'N/A', buildInfo: 'N/A', pinned: false };
         }
 
-        data.buildsMetadata[key].pinned = !data.buildsMetadata[key].pinned;
+        data[metaSource][key].pinned = !data[metaSource][key].pinned;
 
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
 
-        res.json({ success: true, pinned: data.buildsMetadata[key].pinned });
+        res.json({ success: true, pinned: data[metaSource][key].pinned });
     } catch (err) {
         res.status(500).json({ error: 'Failed to pin file' });
     }
@@ -212,11 +225,14 @@ app.post('/api/files/download', async (req, res) => {
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
 
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
-        if (!data.buildsMetadata[key]) {
-            data.buildsMetadata[key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
+        let metaSource = 'buildsMetadata';
+        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+
+        if (!data[metaSource][key]) {
+            data[metaSource][key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
         }
-        data.buildsMetadata[key].downloadCount = (data.buildsMetadata[key].downloadCount || 0) + 1;
-        data.buildsMetadata[key].lastDownloaded = new Date().toISOString();
+        data[metaSource][key].downloadCount = (data[metaSource][key].downloadCount || 0) + 1;
+        data[metaSource][key].lastDownloaded = new Date().toISOString();
 
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
@@ -233,11 +249,12 @@ app.delete('/api/files/:key', requireAuth, async (req, res) => {
         if (deletePassword !== DELETE_PASSWORD) return res.status(401).json({ error: 'Invalid delete password' });
         await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
         const data = JSON.parse(fs.readFileSync(DATA_FILE));
-        if (data.buildsMetadata && data.buildsMetadata[key]) {
-            delete data.buildsMetadata[key];
-            fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-            await saveDataToS3(data);
-        }
+
+        if (data.buildsMetadata && data.buildsMetadata[key]) delete data.buildsMetadata[key];
+        if (data.assetsMetadata && data.assetsMetadata[key]) delete data.assetsMetadata[key];
+
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Delete failed' });
