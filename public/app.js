@@ -40,6 +40,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const buildModalCancelBtn = document.getElementById('build-modal-cancel-btn');
     const buildModalConfirmBtn = document.getElementById('build-modal-confirm-btn');
 
+    // Update Version Modal Elements
+    const updateVersionModal = document.getElementById('update-version-modal');
+    const updateVersionHeader = document.getElementById('update-version-header');
+    const updateVersionInfo = document.getElementById('update-version-info');
+    const updateEventName = document.getElementById('update-event-name');
+    const updateBuildInfo = document.getElementById('update-build-info');
+    const updateFileInput = document.getElementById('update-file-input');
+    const updateProgressContainer = document.getElementById('update-progress-container');
+    const updateProgressFill = document.getElementById('update-progress-fill');
+    const updateVersionCancelBtn = document.getElementById('update-version-cancel-btn');
+    const updateVersionConfirmBtn = document.getElementById('update-version-confirm-btn');
+
+    let currentUpdateKey = null;
+
 
     let isAdminUser = false;
     let modalResolve = null;
@@ -471,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const metaHtml = type === 'build' ? `
                 <strong>Name:</strong> ${file.eventName}<br>
                 <strong>Info:</strong> ${file.buildInfo}<br>
+                <strong>Version:</strong> ${file.version || '1.0'}<br>
                 <strong>Uploaded:</strong> ${uploadTime} (${sizeInMB})<br>
                 <strong>Downloads:</strong> ${file.downloadCount} | <strong>Last:</strong> ${formatDateTime(file.lastDownloaded)}
             ` : `
@@ -493,9 +508,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="pin-btn icon-btn ${file.pinned ? 'active' : ''}" onclick="window.togglePinFile('${file.key}')" title="${file.pinned ? 'Unpin' : 'Pin'}">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                         </button>
-                        <button class="delete-btn icon-btn" onclick="window.deleteFile('${file.key}')" title="Delete">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                        </button>
+                        <div class="dropdown" style="position: relative; display: inline-block;">
+                            <button class="menu-btn icon-btn" onclick="window.toggleMenu('${file.key}')" title="More options">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+                            </button>
+                            <div id="menu-${file.key}" class="dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 150px;">
+                                ${type === 'build' ? `
+                                <button class="dropdown-item" onclick="window.openUpdateVersionModal('${file.key}', '${file.eventName}', '${file.buildInfo}')" style="width: 100%; padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer; font-size: 14px;">
+                                    Update Version
+                                </button>
+                                ` : ''}
+                                <button class="dropdown-item" onclick="window.deleteFile('${file.key}')" style="width: 100%; padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer; font-size: 14px; color: var(--danger);">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
                     ` : ''}
                 </div>
             `;
@@ -727,6 +754,112 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('Network error', 'error');
         }
     };
+
+    // --- Menu Toggle ---
+    window.toggleMenu = (key) => {
+        const menu = document.getElementById(`menu-${key}`);
+        const isVisible = menu.style.display === 'block';
+        
+        // Close all other menus
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.style.display = 'none');
+        
+        // Toggle current menu
+        menu.style.display = isVisible ? 'none' : 'block';
+    };
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.dropdown')) {
+            document.querySelectorAll('.dropdown-menu').forEach(m => m.style.display = 'none');
+        }
+    });
+
+    // --- Update Version Modal ---
+    window.openUpdateVersionModal = (key, eventName, buildInfo) => {
+        currentUpdateKey = key;
+        updateVersionHeader.textContent = `Update Version: ${key}`;
+        updateVersionInfo.textContent = `Current: ${eventName} - ${buildInfo}`;
+        updateEventName.value = eventName;
+        updateBuildInfo.value = buildInfo;
+        updateFileInput.value = '';
+        updateVersionModal.style.display = 'flex';
+        setTimeout(() => updateFileInput.focus(), 100);
+        
+        // Close the menu
+        document.getElementById(`menu-${key}`).style.display = 'none';
+    };
+
+    updateVersionCancelBtn.addEventListener('click', () => {
+        updateVersionModal.style.display = 'none';
+        currentUpdateKey = null;
+        updateFileInput.value = '';
+    });
+
+    updateVersionConfirmBtn.addEventListener('click', () => {
+        const file = updateFileInput.files[0];
+        if (!file) {
+            showToast('Please select a .zip file first', 'error');
+            return;
+        }
+        if (!currentUpdateKey) {
+            showToast('No build selected for update', 'error');
+            return;
+        }
+
+        performVersionUpdate(currentUpdateKey, file);
+    });
+
+    function performVersionUpdate(key, file) {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        updateProgressContainer.style.display = 'block';
+        updateProgressFill.style.width = '0%';
+        updateVersionConfirmBtn.disabled = true;
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `/api/files/${encodeURIComponent(key)}/update-version`, true);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                updateProgressFill.style.width = percentComplete + '%';
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
+                updateProgressFill.style.width = '100%';
+                const data = JSON.parse(xhr.responseText);
+                showToast(`Updated to version ${data.newVersion}!`, 'success');
+                updateFileInput.value = '';
+                setTimeout(() => {
+                    updateProgressContainer.style.display = 'none';
+                    updateProgressFill.style.width = '0%';
+                    updateVersionModal.style.display = 'none';
+                    currentUpdateKey = null;
+                }, 1000);
+                loadAllFiles();
+            } else {
+                let errorMsg = 'Update failed';
+                try {
+                    const err = JSON.parse(xhr.responseText);
+                    errorMsg += ': ' + err.error;
+                } catch (e) { }
+                showToast(errorMsg, 'error');
+                updateProgressContainer.style.display = 'none';
+            }
+            updateVersionConfirmBtn.disabled = false;
+        };
+
+        xhr.onerror = () => {
+            showToast('Network error occurred during update.', 'error');
+            updateProgressContainer.style.display = 'none';
+            updateVersionConfirmBtn.disabled = false;
+        };
+
+        xhr.send(formData);
+    }
 
     // Initial Load
     checkAuth();

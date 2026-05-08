@@ -150,7 +150,8 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
             downloadCount: 0,
             lastDownloaded: null,
             pinned: false,
-            type: type
+            type: type,
+            version: '1.0'
         };
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
@@ -187,7 +188,8 @@ app.get('/api/files', async (req, res) => {
                     downloadCount: meta.downloadCount || 0,
                     lastDownloaded: meta.lastDownloaded || null,
                     pinned: meta.pinned || false,
-                    type: type
+                    type: type,
+                    version: meta.version || '1.0'
                 };
             });
 
@@ -195,6 +197,66 @@ app.get('/api/files', async (req, res) => {
     } catch (err) {
         console.error('S3 List Error:', err);
         res.status(500).json({ error: 'Failed to fetch files' });
+    }
+});
+
+// --- Update Build Version ---
+app.post('/api/files/:key/update-version', requireAuth, upload.single('file'), async (req, res) => {
+    try {
+        const { key } = req.params;
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        let metaSource = 'buildsMetadata';
+        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+        else if (!data.buildsMetadata[key]) metaSource = 'buildsMetadata';
+
+        const existingMeta = data[metaSource][key];
+        if (!existingMeta) return res.status(404).json({ error: 'File not found' });
+
+        // Increment version
+        const currentVersion = parseFloat(existingMeta.version || '1.0');
+        const newVersion = (currentVersion + 1).toFixed(1);
+
+        // Delete old file from S3
+        await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+
+        // Upload new file to S3
+        const fileName = req.file.filename;
+        const filePath = req.file.path;
+        const fileStream = fs.createReadStream(filePath);
+
+        const uploadParams = {
+            Bucket: BUCKET_NAME,
+            Key: fileName,
+            Body: fileStream,
+            ContentType: 'application/zip'
+        };
+
+        await s3.send(new PutObjectCommand(uploadParams));
+        fs.unlinkSync(filePath);
+
+        // Update metadata with new version
+        delete data[metaSource][key];
+        data[metaSource][fileName] = {
+            eventName: existingMeta.eventName,
+            buildInfo: existingMeta.buildInfo,
+            uploadTime: new Date().toISOString(),
+            downloadCount: 0,
+            lastDownloaded: null,
+            pinned: existingMeta.pinned,
+            type: existingMeta.type,
+            version: newVersion
+        };
+
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data);
+
+        res.json({ success: true, fileName, newVersion });
+    } catch (err) {
+        console.error('Update Version Error:', err);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: 'Update failed: ' + err.message });
     }
 });
 

@@ -176,6 +176,34 @@
         </div>
     </div>
 
+    <!-- Update Version Modal -->
+    <div id="update-version-modal" class="modal-overlay" style="display: none; z-index: 2000;">
+        <div class="modal-content">
+            <h3 id="update-version-header">Update Build Version</h3>
+            <p id="update-version-info"
+                style="font-weight: 600; color: var(--primary); margin: 0.5rem 0 1.5rem 0; font-size: 0.9rem; text-align: center; background: #eef2ff; padding: 0.5rem; border-radius: 4px;">
+            </p>
+            <div class="input-stack" style="gap: 1rem; margin-bottom: 1.5rem;">
+                <input type="text" id="update-event-name" placeholder="Name" disabled
+                    style="width: 100%; box-sizing: border-box; background: #f5f5f5;">
+                <input type="text" id="update-build-info" placeholder="Details" disabled
+                    style="width: 100%; box-sizing: border-box; background: #f5f5f5;">
+                <div class="input-group">
+                    <input type="file" id="update-file-input" accept=".zip" style="width: 100%;">
+                </div>
+            </div>
+            <div id="update-progress-container" style="display: none;">
+                <div class="progress-bar">
+                    <div id="update-progress-fill"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="update-version-cancel-btn" class="secondary-btn">Cancel</button>
+                <button id="update-version-confirm-btn" class="primary-btn">Update Version</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications -->
 
     <div id="toast-container"></div>
