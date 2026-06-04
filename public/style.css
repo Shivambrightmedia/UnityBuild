@@ -503,11 +503,20 @@ main {
     margin-top: 1rem;
 }
 
-#progress-fill {
+#progress-fill,
+#update-progress-fill {
     height: 100%;
     background: var(--primary);
     width: 0%;
     transition: width 0.3s;
+}
+
+.progress-text {
+    margin-top: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--primary);
+    text-align: right;
 }
 
 .fade-in {

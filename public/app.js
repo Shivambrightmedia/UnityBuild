@@ -17,6 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const linkUrl = document.getElementById('link-url');
     const progressContainer = document.getElementById('upload-progress-container');
     const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('upload-progress-text');
     const fileSearchInput = document.getElementById('file-search');
     const startDateInput = document.getElementById('start-date');
     const endDateInput = document.getElementById('end-date');
@@ -49,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const updateFileInput = document.getElementById('update-file-input');
     const updateProgressContainer = document.getElementById('update-progress-container');
     const updateProgressFill = document.getElementById('update-progress-fill');
+    const updateProgressText = document.getElementById('update-progress-text');
     const updateVersionCancelBtn = document.getElementById('update-version-cancel-btn');
     const updateVersionConfirmBtn = document.getElementById('update-version-confirm-btn');
 
@@ -280,6 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         progressContainer.style.display = 'block';
         progressFill.style.width = '0%';
+        progressText.textContent = '0% uploaded';
         uploadBtn.disabled = true;
 
         const xhr = new XMLHttpRequest();
@@ -289,12 +292,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.lengthComputable) {
                 const percentComplete = (e.loaded / e.total) * 100;
                 progressFill.style.width = percentComplete + '%';
+                progressText.textContent = `${Math.round(percentComplete)}% uploaded`;
             }
         };
 
         xhr.onload = () => {
             if (xhr.status === 200) {
                 progressFill.style.width = '100%';
+                progressText.textContent = '100% uploaded';
                 showToast('Build uploaded successfully!', 'success');
                 fileInput.value = '';
                 eventNameInput.value = '';
@@ -304,6 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     progressContainer.style.display = 'none';
                     progressFill.style.width = '0%';
+                    progressText.textContent = '0% uploaded';
                 }, 1000);
                 loadAllFiles();
             } else {
@@ -314,6 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (e) { }
                 showToast(errorMsg, 'error');
                 progressContainer.style.display = 'none';
+                progressText.textContent = '0% uploaded';
             }
             uploadBtn.disabled = false;
         };
@@ -321,6 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         xhr.onerror = () => {
             showToast('Network error occurred during upload.', 'error');
             progressContainer.style.display = 'none';
+            progressText.textContent = '0% uploaded';
             uploadBtn.disabled = false;
         };
 
@@ -815,6 +823,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateProgressContainer.style.display = 'block';
         updateProgressFill.style.width = '0%';
+        updateProgressText.textContent = '0% uploaded';
         updateVersionConfirmBtn.disabled = true;
 
         const xhr = new XMLHttpRequest();
@@ -824,18 +833,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.lengthComputable) {
                 const percentComplete = (e.loaded / e.total) * 100;
                 updateProgressFill.style.width = percentComplete + '%';
+                updateProgressText.textContent = `${Math.round(percentComplete)}% uploaded`;
             }
         };
 
         xhr.onload = () => {
             if (xhr.status === 200) {
                 updateProgressFill.style.width = '100%';
+                updateProgressText.textContent = '100% uploaded';
                 const data = JSON.parse(xhr.responseText);
                 showToast(`Updated to version ${data.newVersion}!`, 'success');
                 updateFileInput.value = '';
                 setTimeout(() => {
                     updateProgressContainer.style.display = 'none';
                     updateProgressFill.style.width = '0%';
+                    updateProgressText.textContent = '0% uploaded';
                     updateVersionModal.style.display = 'none';
                     currentUpdateKey = null;
                 }, 1000);
@@ -848,6 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (e) { }
                 showToast(errorMsg, 'error');
                 updateProgressContainer.style.display = 'none';
+                updateProgressText.textContent = '0% uploaded';
             }
             updateVersionConfirmBtn.disabled = false;
         };
@@ -855,6 +868,7 @@ document.addEventListener('DOMContentLoaded', () => {
         xhr.onerror = () => {
             showToast('Network error occurred during update.', 'error');
             updateProgressContainer.style.display = 'none';
+            updateProgressText.textContent = '0% uploaded';
             updateVersionConfirmBtn.disabled = false;
         };
 
