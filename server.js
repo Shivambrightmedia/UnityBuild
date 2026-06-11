@@ -89,7 +89,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage: storage, limits: { fileSize: 3000 * 1024 * 1024 } });
+const upload = multer({ storage: storage, limits: { fileSize: 10000 * 1024 * 1024 } });
 
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
