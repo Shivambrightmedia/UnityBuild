@@ -45,9 +45,9 @@ const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer';
 const ASSET_PASSWORD = process.env.ASSET_PASSWORD || 'asset123';
 
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_PORT === '465',
     requireTLS: true,
     auth: {
         user: process.env.SMTP_EMAIL,
