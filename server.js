@@ -478,7 +478,7 @@ app.post('/api/files/:key/assign', requireAuth, async (req, res) => {
 
             const mailOptions = {
                 from: `"360BrightMedia" <${process.env.SMTP_EMAIL}>`,
-                to: newlyAssigned.join(','),
+                bcc: newlyAssigned.join(','),
                 subject: `Assigned to Build: ${buildName}`,
                 text: `You have been assigned to download the build: ${buildName}.\n\nYou can access it here: ${appUrl}\n\nDownload before the Event starts and best of luck for the event.${timeLimitStr}\n\nTeam 360BrightMedia`
             };
