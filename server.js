@@ -10,6 +10,10 @@ const path = require('path');
 const UAParser = require('ua-parser-js');
 const nodemailer = require('nodemailer');
 const readline = require('readline');
+const dns = require('dns');
+
+// Force IPv4 because Render's free tier has broken IPv6 outbound
+dns.setDefaultResultOrder('ipv4first');
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
