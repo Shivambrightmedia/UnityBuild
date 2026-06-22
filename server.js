@@ -44,16 +44,39 @@ const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer';
 const ASSET_PASSWORD = process.env.ASSET_PASSWORD || 'asset123';
 
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_PORT === '465',
-    requireTLS: true,
-    auth: {
-        user: process.env.SMTP_EMAIL,
-        pass: process.env.SMTP_PASSWORD
+// --- Email via Brevo HTTP API (bypasses Render's SMTP port blocking) ---
+async function sendEmail({ to, subject, textContent }) {
+    const apiKey = process.env.BREVO_API_KEY;
+    const senderEmail = process.env.SMTP_EMAIL || 'noreply@360brightmedia.com';
+    if (!apiKey) return;
+
+    const payload = {
+        sender: { name: '360BrightMedia', email: senderEmail },
+        to: to.map(email => ({ email })),
+        subject: subject,
+        textContent: textContent
+    };
+
+    try {
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': apiKey,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const errBody = await res.text();
+            console.error('Brevo API error:', res.status, errBody);
+        } else {
+            console.log('Email sent successfully via Brevo API');
+        }
+    } catch (err) {
+        console.error('Failed to send email via Brevo:', err.message);
     }
-});
+}
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
@@ -471,7 +494,7 @@ app.post('/api/files/:key/assign', requireAuth, async (req, res) => {
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
 
-        if (newlyAssigned.length > 0 && process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD) {
+        if (newlyAssigned.length > 0 && process.env.BREVO_API_KEY) {
             const buildName = data[metaSource][key].eventName || key;
             const appUrl = `${req.protocol}://${req.get('host')}`;
             
@@ -483,13 +506,11 @@ app.post('/api/files/:key/assign', requireAuth, async (req, res) => {
                 else if (days > 1) timeLimitStr = ` Please download within ${days} days.`;
             }
 
-            const mailOptions = {
-                from: `"360BrightMedia" <${process.env.SMTP_EMAIL}>`,
-                bcc: newlyAssigned.join(','),
+            sendEmail({
+                to: newlyAssigned,
                 subject: `Assigned to Build: ${buildName}`,
-                text: `You have been assigned to download the build: ${buildName}.\n\nYou can access it here: ${appUrl}\n\nDownload before the Event starts and best of luck for the event.${timeLimitStr}\n\nTeam 360BrightMedia`
-            };
-            transporter.sendMail(mailOptions).catch(err => console.error('Failed to send assignment emails:', err));
+                textContent: `You have been assigned to download the build: ${buildName}.\n\nYou can access it here: ${appUrl}\n\nDownload before the Event starts and best of luck for the event.${timeLimitStr}\n\nTeam 360BrightMedia`
+            }).catch(err => console.error('Failed to send assignment emails:', err));
         }
 
         res.json({ success: true, assignedEmails: data[metaSource][key].assignedEmails });
