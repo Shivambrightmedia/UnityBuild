@@ -129,7 +129,7 @@ main {
 
 .admin-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 2rem;
 }
 
@@ -566,4 +566,37 @@ main {
 .drop-message p {
     font-size: 1.5rem;
     font-weight: 700;
+}
+
+/* Checkbox Grid Items */
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.checkbox-item:hover {
+    border-color: var(--primary);
+    background: #f5f3ff;
+}
+.checkbox-item input {
+    cursor: pointer;
+    margin: 0;
+}
+
+/* Analytics Table */
+.analytics-table td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border);
+}
+.analytics-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.analytics-table tbody tr:hover {
+    background: #f9fafb;
 }

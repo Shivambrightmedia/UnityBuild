@@ -22,6 +22,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const startDateInput = document.getElementById('start-date');
     const endDateInput = document.getElementById('end-date');
     const buildFilters = document.getElementById('build-filters');
+    const employeeEmailInput = document.getElementById('employee-email');
+    const addEmployeeBtn = document.getElementById('add-employee-btn');
+    const employeesList = document.getElementById('employees-list');
 
     // Modal Elements
     const modal = document.getElementById('custom-modal');
@@ -56,10 +59,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentUpdateKey = null;
 
-
     let isAdminUser = false;
+    let currentUserEmail = null;
+    let googleClientId = null;
     let modalResolve = null;
     let allFiles = [];
+    let globalEmployees = [];
 
     // --- Helpers ---
     function formatDateTime(isoString) {
@@ -118,9 +123,48 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/auth/status');
             const data = await res.json();
             isAdminUser = data.isAdmin;
+            currentUserEmail = data.userEmail;
+            googleClientId = data.clientId;
+            
             updateUI();
         } catch (e) {
             console.error("Auth check failed", e);
+        }
+    }
+
+    function renderGoogleButton() {
+        const container = document.getElementById('google-btn-container');
+        if (window.google && window.google.accounts && container) {
+            window.google.accounts.id.initialize({
+                client_id: googleClientId,
+                callback: handleCredentialResponse
+            });
+            window.google.accounts.id.renderButton(
+                container,
+                { theme: "outline", size: "large", type: "standard" }
+            );
+        } else {
+            setTimeout(renderGoogleButton, 500); // Retry if script not loaded
+        }
+    }
+
+    async function handleCredentialResponse(response) {
+        try {
+            const res = await fetch('/api/auth/google', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential: response.credential })
+            });
+            const data = await res.json();
+            if (data.success) {
+                currentUserEmail = data.email;
+                showToast(`Logged in as ${data.email}`, 'success');
+                updateUI();
+            } else {
+                showToast('Google Login Failed', 'error');
+            }
+        } catch (e) {
+            showToast('Network error during Google Login', 'error');
         }
     }
 
@@ -155,22 +199,48 @@ document.addEventListener('DOMContentLoaded', () => {
     logoutBtn.addEventListener('click', async () => {
         await fetch('/api/logout', { method: 'POST' });
         isAdminUser = false;
+        currentUserEmail = null;
         showToast('Logged out');
         updateUI();
     });
 
     function updateUI() {
+        const userInfo = document.getElementById('user-info');
+        const googleBtnContainer = document.getElementById('google-btn-container');
+        const globalAnalyticsBtn = document.getElementById('global-analytics-btn');
+
         if (isAdminUser) {
             loginBtn.style.display = 'none';
             passwordInput.style.display = 'none';
             logoutBtn.style.display = 'inline-block';
+            if (globalAnalyticsBtn) globalAnalyticsBtn.style.display = 'inline-block';
             adminPanel.style.display = 'block';
+            if (userInfo) userInfo.style.display = 'none';
+            if (googleBtnContainer) googleBtnContainer.style.display = 'none';
             loadAWSInfo();
+            loadEmployees();
+        } else if (currentUserEmail) {
+            loginBtn.style.display = 'none';
+            passwordInput.style.display = 'none';
+            logoutBtn.style.display = 'inline-block';
+            if (globalAnalyticsBtn) globalAnalyticsBtn.style.display = 'none';
+            adminPanel.style.display = 'none';
+            if (userInfo) {
+                userInfo.style.display = 'inline-block';
+                userInfo.textContent = currentUserEmail;
+            }
+            if (googleBtnContainer) googleBtnContainer.style.display = 'none';
         } else {
             loginBtn.style.display = 'inline-block';
             passwordInput.style.display = 'inline-block';
             logoutBtn.style.display = 'none';
+            if (globalAnalyticsBtn) globalAnalyticsBtn.style.display = 'none';
             adminPanel.style.display = 'none';
+            if (userInfo) userInfo.style.display = 'none';
+            if (googleClientId && googleBtnContainer) {
+                googleBtnContainer.style.display = 'inline-block';
+                renderGoogleButton();
+            }
         }
         loadAllFiles();
         loadLinks();
@@ -526,6 +596,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                     Update Version
                                 </button>
                                 ` : ''}
+                                <button class="dropdown-item" onclick="window.openAssignEmailsModal('${file.key}')" style="width: 100%; padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer; font-size: 14px;">
+                                    Assign Emails
+                                </button>
+                                <button class="dropdown-item" onclick="window.openAnalyticsModal('${file.key}')" style="width: 100%; padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer; font-size: 14px; color: var(--primary);">
+                                    View Analytics
+                                </button>
                                 <button class="dropdown-item" onclick="window.deleteFile('${file.key}')" style="width: 100%; padding: 8px 12px; text-align: left; border: none; background: none; cursor: pointer; font-size: 14px; color: var(--danger);">
                                     Delete
                                 </button>
@@ -556,13 +632,20 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let password = "";
         if (!isAdminUser) {
-            password = await showModal({
-                title: isAsset ? 'Download Asset' : 'Download Build',
-                message: isAsset ? `Enter Asset Password to download: ${key}` : `Enter Viewer Password to download: ${key}`,
-                showInput: true,
-                confirmText: 'Download'
-            });
-            if (password === null) return;
+            if (file && file.hasAccess) {
+                // User has access via Google Auth
+            } else if (currentUserEmail) {
+                password = await showModal({
+                    title: isAsset ? 'Download Asset' : 'Download Build',
+                    message: `Not assigned. Enter password to override:`,
+                    showInput: true,
+                    confirmText: 'Download'
+                });
+                if (password === null) return;
+            } else {
+                showToast('Please login with Google to download.', 'error');
+                return;
+            }
         }
 
         try {
@@ -620,6 +703,181 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // --- Employee Directory Management ---
+    async function loadEmployees() {
+        if (!isAdminUser) return;
+        try {
+            const res = await fetch('/api/employees');
+            if (res.ok) {
+                const data = await res.json();
+                globalEmployees = data.employees;
+                renderEmployees();
+            }
+        } catch (e) {
+            console.error('Failed to load employees', e);
+        }
+    }
+
+    function renderEmployees() {
+        if (!employeesList) return;
+        employeesList.innerHTML = '';
+        if (globalEmployees.length === 0) {
+            employeesList.innerHTML = '<li style="color: var(--text-light); text-align: center;">No employees added yet</li>';
+            return;
+        }
+        globalEmployees.forEach(email => {
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <span>${email}</span>
+                <button class="delete-btn icon-btn" onclick="window.deleteEmployee('${email}')" title="Remove">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+            `;
+            employeesList.appendChild(li);
+        });
+    }
+
+    if (addEmployeeBtn) {
+        addEmployeeBtn.addEventListener('click', async () => {
+            const email = employeeEmailInput.value;
+            if (!email || !email.includes('@') || !email.includes('.com')) {
+                showToast('Please enter a valid email (@ and .com)', 'error');
+                return;
+            }
+            try {
+                const res = await fetch('/api/employees', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    globalEmployees = data.employees;
+                    renderEmployees();
+                    employeeEmailInput.value = '';
+                    showToast('Employee added', 'success');
+                } else {
+                    showToast('Failed to add employee', 'error');
+                }
+            } catch (e) {
+                showToast('Network error', 'error');
+            }
+        });
+    }
+
+    window.deleteEmployee = async (email) => {
+        const password = await showModal({
+            title: 'Confirm Remove',
+            message: `Enter Delete Password to remove employee "${email}":`,
+            showInput: true,
+            confirmText: 'Remove',
+            placeholder: 'Delete password'
+        });
+
+        if (!password) return;
+
+        try {
+            const res = await fetch('/api/employees/' + encodeURIComponent(email), {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deletePassword: password })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                globalEmployees = data.employees;
+                renderEmployees();
+                showToast('Employee removed', 'success');
+            } else {
+                showToast('Failed to remove employee', 'error');
+            }
+        } catch (e) {
+            showToast('Network error', 'error');
+        }
+    };
+
+    // --- Assign Emails Management ---
+    let currentAssignKey = null;
+    const assignEmailsModal = document.getElementById('assign-emails-modal');
+    const assignEmailsHeader = document.getElementById('assign-emails-header');
+    const assignEmailsInfo = document.getElementById('assign-emails-info');
+    const assignEmailsCheckboxes = document.getElementById('assign-emails-checkboxes');
+    const assignDurationSelect = document.getElementById('assign-duration-select');
+    const assignEmailsCancelBtn = document.getElementById('assign-emails-cancel-btn');
+    const assignEmailsConfirmBtn = document.getElementById('assign-emails-confirm-btn');
+
+    window.openAssignEmailsModal = (key) => {
+        const file = allFiles.find(f => f.key === key);
+        if (!file) return;
+
+        currentAssignKey = key;
+        assignEmailsHeader.textContent = `Assign Access: ${key}`;
+        assignEmailsInfo.textContent = `Currently Assigned: ${file.assignedEmails ? file.assignedEmails.length : 0} employees`;
+        
+        if (assignEmailsCheckboxes) {
+            assignEmailsCheckboxes.innerHTML = '';
+            if (globalEmployees.length === 0) {
+                assignEmailsCheckboxes.innerHTML = '<p style="color: var(--text-light); text-align: center;">No employees in directory.</p>';
+            } else {
+                const assigned = file.assignedEmails || [];
+                globalEmployees.forEach(email => {
+                    const isChecked = assigned.includes(email);
+                    const id = `cb-${email.replace(/[@.]/g, '-')}`;
+                    const label = document.createElement('label');
+                    label.className = 'checkbox-item';
+                    label.innerHTML = `
+                        <input type="checkbox" id="${id}" value="${email}" ${isChecked ? 'checked' : ''}>
+                        <span>${email}</span>
+                    `;
+                    assignEmailsCheckboxes.appendChild(label);
+                });
+            }
+        }
+        if (assignDurationSelect) assignDurationSelect.value = 'no_limit';
+        
+        assignEmailsModal.style.display = 'flex';
+        document.getElementById(`menu-${key}`).style.display = 'none';
+    };
+
+    if (assignEmailsCancelBtn) {
+        assignEmailsCancelBtn.addEventListener('click', () => {
+            assignEmailsModal.style.display = 'none';
+            currentAssignKey = null;
+        });
+    }
+
+    if (assignEmailsConfirmBtn) {
+        assignEmailsConfirmBtn.addEventListener('click', async () => {
+            if (!currentAssignKey) return;
+            
+            let emails = [];
+            if (assignEmailsCheckboxes) {
+                const checkboxes = assignEmailsCheckboxes.querySelectorAll('input[type="checkbox"]:checked');
+                emails = Array.from(checkboxes).map(cb => cb.value);
+            }
+            let duration = 'no_limit';
+            if (assignDurationSelect) {
+                duration = assignDurationSelect.value;
+            }
+
+            try {
+                const res = await fetch(`/api/files/${encodeURIComponent(currentAssignKey)}/assign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ emails, duration })
+                });
+                if (res.ok) {
+                    showToast('Emails assigned successfully', 'success');
+                    assignEmailsModal.style.display = 'none';
+                    loadAllFiles();
+                } else {
+                    showToast('Failed to assign emails', 'error');
+                }
+            } catch (e) {
+                showToast('Network error', 'error');
+            }
+        });
+    }
+
     // --- Web Links Management ---
     addLinkBtn.addEventListener('click', async () => {
         if (!linkTitle.value || !linkUrl.value) {
@@ -642,10 +900,90 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 showToast('Failed to save link', 'error');
             }
-        } catch (e) {
-            showToast('Network error', 'error');
+        } catch (error) {
+            showToast('Error saving link', 'error');
         }
     });
+
+    // --- Analytics Management ---
+    const analyticsModal = document.getElementById('analytics-modal');
+    const analyticsCloseBtn = document.getElementById('analytics-close-btn');
+    const analyticsHeader = document.getElementById('analytics-header');
+    const tabAssignments = document.getElementById('tab-assignments');
+    const tabDownloads = document.getElementById('tab-downloads');
+    const viewAssignments = document.getElementById('analytics-assignments-view');
+    const viewDownloads = document.getElementById('analytics-downloads-view');
+    const bodyAssignments = document.getElementById('analytics-assignments-body');
+    const bodyDownloads = document.getElementById('analytics-downloads-body');
+
+    if (analyticsModal) {
+        analyticsCloseBtn.addEventListener('click', () => {
+            analyticsModal.style.display = 'none';
+        });
+
+        tabAssignments.addEventListener('click', () => {
+            tabAssignments.style.borderBottomColor = 'var(--primary)';
+            tabAssignments.style.color = 'var(--primary)';
+            tabDownloads.style.borderBottomColor = 'transparent';
+            tabDownloads.style.color = 'var(--text-light)';
+            viewAssignments.style.display = 'block';
+            viewDownloads.style.display = 'none';
+        });
+
+        tabDownloads.addEventListener('click', () => {
+            tabDownloads.style.borderBottomColor = 'var(--primary)';
+            tabDownloads.style.color = 'var(--primary)';
+            tabAssignments.style.borderBottomColor = 'transparent';
+            tabAssignments.style.color = 'var(--text-light)';
+            viewDownloads.style.display = 'block';
+            viewAssignments.style.display = 'none';
+        });
+
+        window.openAnalyticsModal = async (key) => {
+            analyticsHeader.textContent = `Analytics: ${key}`;
+            bodyAssignments.innerHTML = '<tr><td colspan="2" style="text-align:center;">Loading...</td></tr>';
+            bodyDownloads.innerHTML = '<tr><td colspan="3" style="text-align:center;">Loading...</td></tr>';
+            analyticsModal.style.display = 'flex';
+            document.getElementById(`menu-${key}`).style.display = 'none';
+
+            try {
+                const res = await fetch(`/api/files/${encodeURIComponent(key)}/analytics`);
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    bodyAssignments.innerHTML = '';
+                    const assignKeys = Object.keys(data.assignmentDetails);
+                    if (assignKeys.length === 0) {
+                        bodyAssignments.innerHTML = '<tr><td colspan="2" style="text-align:center; color: var(--text-light);">No assignments</td></tr>';
+                    } else {
+                        assignKeys.forEach(email => {
+                            bodyAssignments.innerHTML += `<tr><td>${email}</td><td>${formatDateTime(data.assignmentDetails[email])}</td></tr>`;
+                        });
+                    }
+
+                    bodyDownloads.innerHTML = '';
+                    if (data.downloadLogs.length === 0) {
+                        bodyDownloads.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--text-light);">No downloads yet</td></tr>';
+                    } else {
+                        data.downloadLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+                        data.downloadLogs.forEach(log => {
+                            bodyDownloads.innerHTML += `<tr>
+                                <td>${log.email}</td>
+                                <td>${formatDateTime(log.date)}</td>
+                                <td>${log.device}<br><span style="font-size:0.75rem; color:var(--text-light)">${log.os} • ${log.browser}</span></td>
+                                <td>${log.authMethod || 'Unknown'}</td>
+                            </tr>`;
+                        });
+                    }
+                } else {
+                    bodyAssignments.innerHTML = '<tr><td colspan="2" style="text-align:center; color: var(--danger);">Failed to load</td></tr>';
+                    bodyDownloads.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--danger);">Failed to load</td></tr>';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        };
+    }
 
     async function loadLinks() {
         linksList.innerHTML = '<li style="color: var(--text-light)">Loading links...</li>';
@@ -873,6 +1211,135 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         xhr.send(formData);
+    }
+
+    // --- Global Analytics Management ---
+    const globalAnalyticsBtn = document.getElementById('global-analytics-btn');
+    const globalAnalyticsModal = document.getElementById('global-analytics-modal');
+    const globalAnalyticsCloseBtn = document.getElementById('global-analytics-close-btn');
+    
+    const globalTabAssignments = document.getElementById('global-tab-assignments');
+    const globalTabDownloads = document.getElementById('global-tab-downloads');
+    const globalViewAssignments = document.getElementById('global-assignments-view');
+    const globalViewDownloads = document.getElementById('global-downloads-view');
+    const globalBodyAssignments = document.getElementById('global-assignments-body');
+    const globalBodyDownloads = document.getElementById('global-downloads-body');
+
+    const globalFilterEmail = document.getElementById('global-filter-email');
+    const globalFilterBuild = document.getElementById('global-filter-build');
+    const globalFilterStart = document.getElementById('global-filter-start');
+    const globalFilterEnd = document.getElementById('global-filter-end');
+
+    let globalDataAssignments = [];
+    let globalDataDownloads = [];
+
+    if (globalAnalyticsBtn && globalAnalyticsModal) {
+        globalAnalyticsBtn.addEventListener('click', async () => {
+            globalAnalyticsModal.style.display = 'flex';
+            globalBodyAssignments.innerHTML = '<tr><td colspan="3" style="text-align:center;">Loading...</td></tr>';
+            globalBodyDownloads.innerHTML = '<tr><td colspan="4" style="text-align:center;">Loading...</td></tr>';
+            
+            try {
+                const res = await fetch('/api/analytics/all');
+                if (res.ok) {
+                    const data = await res.json();
+                    globalDataAssignments = data.allAssignments || [];
+                    globalDataDownloads = data.allDownloads || [];
+                    renderGlobalAnalytics();
+                } else {
+                    globalBodyAssignments.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--danger);">Failed to load</td></tr>';
+                    globalBodyDownloads.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--danger);">Failed to load</td></tr>';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        });
+
+        globalAnalyticsCloseBtn.addEventListener('click', () => {
+            globalAnalyticsModal.style.display = 'none';
+        });
+
+        const reRender = () => renderGlobalAnalytics();
+        globalFilterEmail.addEventListener('input', reRender);
+        globalFilterBuild.addEventListener('input', reRender);
+        globalFilterStart.addEventListener('change', reRender);
+        globalFilterEnd.addEventListener('change', reRender);
+
+        globalTabAssignments.addEventListener('click', () => {
+            globalTabAssignments.style.borderBottomColor = 'var(--primary)';
+            globalTabAssignments.style.color = 'var(--primary)';
+            globalTabDownloads.style.borderBottomColor = 'transparent';
+            globalTabDownloads.style.color = 'var(--text-light)';
+            globalViewAssignments.style.display = 'block';
+            globalViewDownloads.style.display = 'none';
+        });
+
+        globalTabDownloads.addEventListener('click', () => {
+            globalTabDownloads.style.borderBottomColor = 'var(--primary)';
+            globalTabDownloads.style.color = 'var(--primary)';
+            globalTabAssignments.style.borderBottomColor = 'transparent';
+            globalTabAssignments.style.color = 'var(--text-light)';
+            globalViewDownloads.style.display = 'block';
+            globalViewAssignments.style.display = 'none';
+        });
+
+        function renderGlobalAnalytics() {
+            const emailFilter = globalFilterEmail.value.toLowerCase().trim();
+            const buildFilter = globalFilterBuild.value.toLowerCase().trim();
+            const startStr = globalFilterStart.value;
+            const endStr = globalFilterEnd.value;
+            
+            let start = null;
+            let end = null;
+            if (startStr) {
+                const [y, m, d] = startStr.split('-').map(Number);
+                start = new Date(y, m - 1, d, 0, 0, 0, 0);
+            }
+            if (endStr) {
+                const [y, m, d] = endStr.split('-').map(Number);
+                end = new Date(y, m - 1, d, 23, 59, 59, 999);
+            }
+
+            const filterItem = (item) => {
+                if (emailFilter && !item.email.toLowerCase().includes(emailFilter)) return false;
+                if (buildFilter && !item.buildKey.toLowerCase().includes(buildFilter)) return false;
+                const date = new Date(item.date);
+                if (start && date < start) return false;
+                if (end && date > end) return false;
+                return true;
+            };
+
+            const filteredAssignments = globalDataAssignments.filter(filterItem);
+            const filteredDownloads = globalDataDownloads.filter(filterItem);
+
+            globalBodyAssignments.innerHTML = '';
+            if (filteredAssignments.length === 0) {
+                globalBodyAssignments.innerHTML = '<tr><td colspan="3" style="text-align:center; color: var(--text-light);">No matching assignments</td></tr>';
+            } else {
+                filteredAssignments.forEach(item => {
+                    globalBodyAssignments.innerHTML += `<tr>
+                        <td>${item.buildKey}</td>
+                        <td>${item.email}</td>
+                        <td>${formatDateTime(item.date)}</td>
+                    </tr>`;
+                });
+            }
+
+            globalBodyDownloads.innerHTML = '';
+            if (filteredDownloads.length === 0) {
+                globalBodyDownloads.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-light);">No matching downloads</td></tr>';
+            } else {
+                filteredDownloads.forEach(item => {
+                    globalBodyDownloads.innerHTML += `<tr>
+                        <td>${item.buildKey}</td>
+                        <td>${item.email}</td>
+                        <td>${formatDateTime(item.date)}</td>
+                        <td>${item.device}<br><span style="font-size:0.75rem; color:var(--text-light)">${item.os} • ${item.browser}</span></td>
+                        <td>${item.authMethod || 'Unknown'}</td>
+                    </tr>`;
+                });
+            }
+        }
     }
 
     // Initial Load

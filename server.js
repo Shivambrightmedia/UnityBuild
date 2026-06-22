@@ -3,9 +3,16 @@ const express = require('express');
 const multer = require('multer');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { OAuth2Client } = require('google-auth-library');
 const session = require('express-session');
 const fs = require('fs');
 const path = require('path');
+const UAParser = require('ua-parser-js');
+const nodemailer = require('nodemailer');
+const readline = require('readline');
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,12 +40,25 @@ const DELETE_PASSWORD = process.env.DELETE_PASSWORD;
 const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'viewer';
 const ASSET_PASSWORD = process.env.ASSET_PASSWORD || 'asset123';
 
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.SMTP_EMAIL,
+        pass: process.env.SMTP_PASSWORD
+    }
+});
+
 const DATA_FILE = path.join(__dirname, 'data.json');
 const S3_DATA_KEY = 'persistent_data.json';
+const ANALYTICS_FILE = path.join(__dirname, 'analytics.jsonl');
+const S3_ANALYTICS_KEY = 'persistent_analytics.jsonl';
 
 // --- Initialize Local Data File ---
 if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {}, assetsMetadata: {} }));
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ links: [], buildsMetadata: {}, assetsMetadata: {}, employees: [] }));
+}
+if (!fs.existsSync(ANALYTICS_FILE)) {
+    fs.writeFileSync(ANALYTICS_FILE, '');
 }
 
 // --- S3 Persistence Helpers ---
@@ -57,6 +77,16 @@ async function loadDataFromS3() {
             console.error('S3 Sync Error:', err.message);
         }
     }
+
+    try {
+        const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: S3_ANALYTICS_KEY });
+        const response = await s3.send(command);
+        const dataStr = await response.Body.transformToString();
+        fs.writeFileSync(ANALYTICS_FILE, dataStr);
+        console.log('Analytics data synced from S3');
+    } catch (err) {
+        if (err.name !== 'NoSuchKey') console.error('S3 Analytics Sync Error:', err.message);
+    }
 }
 
 async function saveDataToS3(data) {
@@ -68,13 +98,57 @@ async function saveDataToS3(data) {
             ContentType: 'application/json'
         });
         await s3.send(command);
-        console.log('Data backed up to S3');
     } catch (err) {
         console.error('Error backing up to S3:', err.message);
     }
 }
 
-loadDataFromS3();
+async function saveAnalyticsToS3() {
+    try {
+        if (!fs.existsSync(ANALYTICS_FILE)) return;
+        const fileStream = fs.createReadStream(ANALYTICS_FILE);
+        const command = new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: S3_ANALYTICS_KEY,
+            Body: fileStream,
+            ContentType: 'application/jsonlines'
+        });
+        await s3.send(command);
+    } catch (err) {
+        console.error('Error backing up analytics to S3:', err.message);
+    }
+}
+
+loadDataFromS3().then(() => {
+    // Migration logic for old downloadLogs
+    try {
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+        let migratedAny = false;
+        const processMeta = (metaObj) => {
+            if (!metaObj) return;
+            Object.keys(metaObj).forEach(key => {
+                if (metaObj[key].downloadLogs && metaObj[key].downloadLogs.length > 0) {
+                    metaObj[key].downloadLogs.forEach(log => {
+                        const newLog = { buildKey: key, ...log };
+                        fs.appendFileSync(ANALYTICS_FILE, JSON.stringify(newLog) + '\n');
+                    });
+                    delete metaObj[key].downloadLogs;
+                    migratedAny = true;
+                }
+            });
+        };
+        processMeta(data.buildsMetadata);
+        processMeta(data.assetsMetadata);
+        if (migratedAny) {
+            fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+            saveDataToS3(data);
+            saveAnalyticsToS3();
+            console.log('Migrated old download logs to analytics.jsonl');
+        }
+    } catch (e) {
+        console.error('Migration error:', e);
+    }
+});
 
 const requireAuth = (req, res, next) => {
     if (req.session.isAdmin) return next();
@@ -102,7 +176,27 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/auth/status', (req, res) => {
-    res.json({ isAdmin: !!req.session.isAdmin });
+    res.json({
+        isAdmin: !!req.session.isAdmin,
+        userEmail: req.session.userEmail || null,
+        clientId: GOOGLE_CLIENT_ID
+    });
+});
+
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        const { credential } = req.body;
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: GOOGLE_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+        req.session.userEmail = payload.email;
+        res.json({ success: true, email: payload.email });
+    } catch (err) {
+        console.error('Google Auth Error:', err);
+        res.status(401).json({ success: false, error: 'Invalid Google Token' });
+    }
 });
 
 app.get('/api/aws-info', requireAuth, (req, res) => {
@@ -150,6 +244,7 @@ app.post('/api/files', requireAuth, upload.single('file'), async (req, res) => {
             downloadCount: 0,
             lastDownloaded: null,
             pinned: false,
+            assignedEmails: [],
             type: type,
             version: '1.0'
         };
@@ -174,11 +269,14 @@ app.get('/api/files', async (req, res) => {
         const assetsMetadata = data.assetsMetadata || {};
 
         const files = (result.Contents || [])
-            .filter(file => file.Key !== S3_DATA_KEY)
+            .filter(file => file.Key !== S3_DATA_KEY && file.Key !== S3_ANALYTICS_KEY)
             .map(file => {
                 const meta = buildsMetadata[file.Key] || assetsMetadata[file.Key] || {};
                 const type = buildsMetadata[file.Key] ? 'build' : (assetsMetadata[file.Key] ? 'asset' : 'build');
-                return {
+                const assignedEmails = meta.assignedEmails || [];
+                const hasAccess = req.session.isAdmin || (req.session.userEmail && assignedEmails.includes(req.session.userEmail));
+
+                const out = {
                     key: file.Key,
                     size: file.Size,
                     lastModified: file.LastModified,
@@ -189,8 +287,13 @@ app.get('/api/files', async (req, res) => {
                     lastDownloaded: meta.lastDownloaded || null,
                     pinned: meta.pinned || false,
                     type: type,
-                    version: meta.version || '1.0'
+                    version: meta.version || '1.0',
+                    hasAccess: !!hasAccess
                 };
+                if (req.session.isAdmin) {
+                    out.assignedEmails = assignedEmails;
+                }
+                return out;
             });
 
         res.json({ files });
@@ -245,9 +348,29 @@ app.post('/api/files/:key/update-version', requireAuth, upload.single('file'), a
             downloadCount: 0,
             lastDownloaded: null,
             pinned: existingMeta.pinned,
+            assignedEmails: existingMeta.assignedEmails || [],
+            assignmentDetails: existingMeta.assignmentDetails || {},
+            assignmentExpirations: existingMeta.assignmentExpirations || {},
             type: existingMeta.type,
             version: newVersion
         };
+
+        if (fs.existsSync(ANALYTICS_FILE)) {
+            const lines = fs.readFileSync(ANALYTICS_FILE, 'utf-8').split('\n');
+            const newLines = lines.map(line => {
+                if (!line.trim()) return line;
+                try {
+                    const log = JSON.parse(line);
+                    if (log.buildKey === key) {
+                        log.buildKey = fileName;
+                        return JSON.stringify(log);
+                    }
+                } catch(e) {}
+                return line;
+            });
+            fs.writeFileSync(ANALYTICS_FILE, newLines.join('\n'));
+            saveAnalyticsToS3(); // Backup migrated analytics
+        }
 
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
@@ -285,6 +408,89 @@ app.post('/api/files/:key/pin', requireAuth, async (req, res) => {
     }
 });
 
+// --- NEW: Assign Emails for Files ---
+app.post('/api/files/:key/assign', requireAuth, async (req, res) => {
+    try {
+        const { key } = req.params;
+        const { emails, duration } = req.body; // array of strings and duration
+        const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+        let metaSource = 'buildsMetadata';
+        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+        else if (!data.buildsMetadata[key]) metaSource = 'buildsMetadata';
+
+        if (!data[metaSource][key]) return res.status(404).json({ error: 'File not found' });
+
+        const newEmails = emails.map(e => e.trim().toLowerCase()).filter(e => e);
+
+        if (!data[metaSource][key].assignmentDetails) data[metaSource][key].assignmentDetails = {};
+        if (!data[metaSource][key].assignmentExpirations) data[metaSource][key].assignmentExpirations = {};
+
+        const now = new Date();
+        let expiryDateStr = null;
+        if (duration && duration !== 'no_limit') {
+            const days = parseInt(duration, 10);
+            if (!isNaN(days)) {
+                const expiry = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+                expiryDateStr = expiry.toISOString();
+            }
+        }
+
+        const nowStr = now.toISOString();
+        const newlyAssigned = [];
+
+        newEmails.forEach(email => {
+            if (!data[metaSource][key].assignmentDetails[email]) {
+                data[metaSource][key].assignmentDetails[email] = nowStr;
+                newlyAssigned.push(email);
+            }
+            if (expiryDateStr) {
+                data[metaSource][key].assignmentExpirations[email] = expiryDateStr;
+            } else {
+                delete data[metaSource][key].assignmentExpirations[email];
+            }
+        });
+
+        const oldEmails = Object.keys(data[metaSource][key].assignmentDetails);
+        oldEmails.forEach(email => {
+            if (!newEmails.includes(email)) {
+                delete data[metaSource][key].assignmentDetails[email];
+                delete data[metaSource][key].assignmentExpirations[email];
+            }
+        });
+
+        data[metaSource][key].assignedEmails = newEmails;
+
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data);
+
+        if (newlyAssigned.length > 0 && process.env.SMTP_EMAIL && process.env.SMTP_PASSWORD) {
+            const buildName = data[metaSource][key].eventName || key;
+            const appUrl = `${req.protocol}://${req.get('host')}`;
+            
+            let timeLimitStr = '';
+            if (duration && duration !== 'no_limit') {
+                const days = parseInt(duration, 10);
+                if (days === 1) timeLimitStr = ' Please download within 1 day.';
+                else if (days === 7) timeLimitStr = ' Please download within 1 week.';
+                else if (days > 1) timeLimitStr = ` Please download within ${days} days.`;
+            }
+
+            const mailOptions = {
+                from: `"360BrightMedia" <${process.env.SMTP_EMAIL}>`,
+                to: newlyAssigned.join(','),
+                subject: `Assigned to Build: ${buildName}`,
+                text: `You have been assigned to download the build: ${buildName}.\n\nYou can access it here: ${appUrl}\n\nDownload before the Event starts and best of luck for the event.${timeLimitStr}\n\nTeam 360BrightMedia`
+            };
+            transporter.sendMail(mailOptions).catch(err => console.error('Failed to send assignment emails:', err));
+        }
+
+        res.json({ success: true, assignedEmails: data[metaSource][key].assignedEmails });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to assign emails' });
+    }
+});
+
 app.post('/api/files/download', async (req, res) => {
     try {
         const { key, password } = req.body;
@@ -295,27 +501,148 @@ app.post('/api/files/download', async (req, res) => {
 
         const requiredPassword = fileType === 'asset' ? ASSET_PASSWORD : ACCESS_PASSWORD;
 
-        if (!req.session.isAdmin && password !== requiredPassword) {
-            return res.status(401).json({ error: 'Invalid access password' });
+        let metaSource = 'buildsMetadata';
+        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+
+        const assignedEmails = data[metaSource] && data[metaSource][key] ? (data[metaSource][key].assignedEmails || []) : [];
+        const assignmentExpirations = data[metaSource] && data[metaSource][key] ? (data[metaSource][key].assignmentExpirations || {}) : {};
+        const isPasswordValid = password && password === requiredPassword;
+        let isEmailAssigned = req.session.userEmail && assignedEmails.includes(req.session.userEmail);
+        let isExpired = false;
+
+        if (isEmailAssigned && assignmentExpirations[req.session.userEmail]) {
+            const expiryDate = new Date(assignmentExpirations[req.session.userEmail]);
+            if (new Date() > expiryDate) {
+                isEmailAssigned = false;
+                isExpired = true;
+            }
+        }
+
+        if (!req.session.isAdmin) {
+            if (!req.session.userEmail) {
+                return res.status(401).json({ error: 'Please login with Google to download' });
+            }
+            if (isExpired && !isPasswordValid) {
+                return res.status(403).json({ error: 'Your access to this file has expired' });
+            }
+            if (!isEmailAssigned && !isPasswordValid) {
+                return res.status(403).json({ error: 'Not assigned and invalid password' });
+            }
         }
         const getCommand = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
         const url = await getSignedUrl(s3, getCommand, { expiresIn: 300 });
-
-        let metaSource = 'buildsMetadata';
-        if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
 
         if (!data[metaSource][key]) {
             data[metaSource][key] = { eventName: 'N/A', buildInfo: 'N/A', uploadTime: new Date().toISOString() };
         }
         data[metaSource][key].downloadCount = (data[metaSource][key].downloadCount || 0) + 1;
         data[metaSource][key].lastDownloaded = new Date().toISOString();
+        const ua = new UAParser(req.headers['user-agent']);
+        const browser = ua.getBrowser();
+        const os = ua.getOS();
+        const device = ua.getDevice();
+
+        const deviceStr = device.type ? `${device.vendor || ''} ${device.type}`.trim() : 'Desktop/Laptop';
+        const osStr = os.name ? `${os.name} ${os.version || ''}`.trim() : 'Unknown OS';
+        const downloaderEmail = req.session.userEmail || (req.session.isAdmin ? 'Admin' : 'Anonymous');
+
+        let authMethod = 'Unknown';
+        if (req.session.isAdmin) authMethod = 'Admin';
+        else if (isEmailAssigned) authMethod = 'Assigned';
+        else if (isPasswordValid) authMethod = 'Password';
+
+        const newLog = {
+            buildKey: key,
+            email: downloaderEmail,
+            date: new Date().toISOString(),
+            device: deviceStr,
+            os: osStr,
+            browser: `${browser.name || 'Unknown'} ${browser.version || ''}`.trim(),
+            authMethod: authMethod
+        };
+        fs.appendFileSync(ANALYTICS_FILE, JSON.stringify(newLog) + '\n');
 
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         await saveDataToS3(data);
+        saveAnalyticsToS3(); // Backup analytics async
         res.json({ url });
     } catch (err) {
         res.status(500).json({ error: 'Failed to generate link' });
     }
+});
+
+app.get('/api/files/:key/analytics', requireAuth, async (req, res) => {
+    const { key } = req.params;
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+    let metaSource = 'buildsMetadata';
+    if (data.assetsMetadata && data.assetsMetadata[key]) metaSource = 'assetsMetadata';
+    else if (!data.buildsMetadata[key]) metaSource = 'buildsMetadata';
+
+    const fileData = data[metaSource][key];
+    if (!fileData) return res.status(404).json({ error: 'File not found' });
+
+    const downloadLogs = [];
+    if (fs.existsSync(ANALYTICS_FILE)) {
+        const fileStream = fs.createReadStream(ANALYTICS_FILE);
+        const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+        for await (const line of rl) {
+            if (!line.trim()) continue;
+            try {
+                const log = JSON.parse(line);
+                if (log.buildKey === key) downloadLogs.push(log);
+            } catch (e) {}
+        }
+    }
+
+    res.json({
+        assignmentDetails: fileData.assignmentDetails || {},
+        downloadLogs: downloadLogs
+    });
+});
+
+app.get('/api/analytics/all', requireAuth, async (req, res) => {
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+
+    let allAssignments = [];
+    let allDownloads = [];
+
+    const processMetadata = (metaObj) => {
+        if (!metaObj) return;
+        Object.keys(metaObj).forEach(key => {
+            const fileData = metaObj[key];
+            if (fileData.assignmentDetails) {
+                Object.keys(fileData.assignmentDetails).forEach(email => {
+                    allAssignments.push({
+                        buildKey: key,
+                        email: email,
+                        date: fileData.assignmentDetails[email]
+                    });
+                });
+            }
+        });
+    };
+
+    processMetadata(data.buildsMetadata);
+    processMetadata(data.assetsMetadata);
+
+    if (fs.existsSync(ANALYTICS_FILE)) {
+        const fileStream = fs.createReadStream(ANALYTICS_FILE);
+        const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+        for await (const line of rl) {
+            if (!line.trim()) continue;
+            try {
+                const log = JSON.parse(line);
+                allDownloads.push(log);
+            } catch (e) {}
+        }
+    }
+
+    // Sort descending by date
+    allAssignments.sort((a, b) => new Date(b.date) - new Date(a.date));
+    allDownloads.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    res.json({ allAssignments, allDownloads });
 });
 
 app.delete('/api/files/:key', requireAuth, async (req, res) => {
@@ -397,6 +724,40 @@ app.delete('/api/links/:id', requireAuth, async (req, res) => {
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
     await saveDataToS3(data);
     res.json({ success: true });
+});
+
+// --- Employee Directory ---
+app.get('/api/employees', requireAuth, (req, res) => {
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+    res.json({ employees: data.employees || [] });
+});
+
+app.post('/api/employees', requireAuth, async (req, res) => {
+    const { email } = req.body;
+    if (!email || !email.includes('@') || !email.includes('.com')) {
+        return res.status(400).json({ error: 'Valid email required (@ and .com)' });
+    }
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+    if (!data.employees) data.employees = [];
+    const normalized = email.trim().toLowerCase();
+    if (!data.employees.includes(normalized)) {
+        data.employees.push(normalized);
+        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        await saveDataToS3(data);
+    }
+    res.json({ success: true, employees: data.employees });
+});
+
+app.delete('/api/employees/:email', requireAuth, async (req, res) => {
+    const { email } = req.params;
+    const { deletePassword } = req.body;
+    if (deletePassword !== DELETE_PASSWORD) return res.status(401).json({ error: 'Invalid delete password' });
+    const data = JSON.parse(fs.readFileSync(DATA_FILE));
+    if (!data.employees) data.employees = [];
+    data.employees = data.employees.filter(e => e !== email.toLowerCase());
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    await saveDataToS3(data);
+    res.json({ success: true, employees: data.employees });
 });
 
 app.listen(PORT, () => {
