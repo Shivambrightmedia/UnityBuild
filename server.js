@@ -298,7 +298,7 @@ app.get('/api/files', async (req, res) => {
         const buildsMetadata = data.buildsMetadata || {};
         const assetsMetadata = data.assetsMetadata || {};
 
-        const files = (result.Contents || [])
+        let files = (result.Contents || [])
             .filter(file => file.Key !== S3_DATA_KEY && file.Key !== S3_ANALYTICS_KEY)
             .map(file => {
                 const meta = buildsMetadata[file.Key] || assetsMetadata[file.Key] || {};
@@ -325,6 +325,10 @@ app.get('/api/files', async (req, res) => {
                 }
                 return out;
             });
+
+        if (!req.session.isAdmin) {
+            files = files.filter(f => f.hasAccess);
+        }
 
         res.json({ files });
     } catch (err) {
