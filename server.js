@@ -325,8 +325,7 @@ app.get('/api/files', async (req, res) => {
                 }
                 return out;
             });
-
-        if (!req.session.isAdmin) {
+        if (!req.session.isAdmin && req.session.userEmail) {
             files = files.filter(f => f.hasAccess);
         }
 
